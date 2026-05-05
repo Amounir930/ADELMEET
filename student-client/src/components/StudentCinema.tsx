@@ -1,0 +1,268 @@
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Room, RemoteParticipant, VideoQuality } from 'livekit-client';
+import { VideoTrack } from './VideoTrack';
+import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge } from 'lucide-react';
+import { useLiveKit } from '../contexts/LiveKitContext';
+import { useStudentModeration } from '../hooks/useStudentModeration';
+
+interface StudentCinemaProps {
+  room: Room;
+  lecture: any;
+  onDisconnect: () => void;
+}
+
+export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onDisconnect }) => {
+  const { socket } = useLiveKit();
+  const [teacher, setTeacher] = useState<RemoteParticipant | null>(null);
+  const [isMicEnabled, setIsMicEnabled] = useState(false);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const [currentQuality, setCurrentQuality] = useState<VideoQuality>(VideoQuality.HIGH);
+  const [toast, setToast] = useState<{ msg: string; type: 'error' | 'success' } | null>(null);
+  const controlsTimerRef = useRef<any>(null);
+
+  const showToast = (msg: string, type: 'error' | 'success' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  useEffect(() => {
+    if (!room || !socket || !room.localParticipant) return;
+    socket.emit('join_room', { roomName: room.name, identity: room.localParticipant.identity, role: 'student' });
+
+    // MISSION 13: SOVEREIGN ENFORCEMENT - Auto-kick on session end
+    socket.on('session_ended', () => {
+      console.log('[STUDENT-CINEMA] Sovereign Command: Session Ended by Teacher');
+      showToast('The teacher has ended this session. Redirecting...', 'success');
+      setTimeout(() => onDisconnect(), 2000); // Small delay to let toast show
+    });
+
+    return () => {
+      socket.off('session_ended');
+    };
+  }, [room.name, socket]);
+
+  useEffect(() => {
+    if (!room) return;
+    
+    const discover = () => {
+      const participants = Array.from(room.remoteParticipants.values());
+      const teacherPart = participants.find(p => p.identity.toLowerCase().includes('teacher') || p.identity.endsWith('_teacher'));
+      if (teacherPart?.identity !== teacher?.identity) setTeacher(teacherPart || null);
+    };
+
+    const onParticipantDisconnected = (p: RemoteParticipant) => {
+      if (p.identity === teacher?.identity) {
+        console.log('[STUDENT-CINEMA] Teacher Left Room (Instant Detection)');
+        setTeacher(null);
+      }
+    };
+
+    room.on('participantDisconnected' as any, onParticipantDisconnected);
+    const interval = setInterval(discover, 1000);
+    
+    discover();
+
+    return () => {
+      room.off('participantDisconnected' as any, onParticipantDisconnected);
+      clearInterval(interval);
+    };
+  }, [room, teacher?.identity]);
+
+  useEffect(() => {
+    if (!room) return;
+    // SOVEREIGN FIX: Added 'participant' as the 3rd argument to avoid undefined identity crash
+    const onTrackSubscribed = (track: any, pub: any, participant: any) => {
+      if (track.kind === 'video' && participant?.identity === teacher?.identity) {
+        console.log(`[STUDENT-QUALITY] Teacher Track Subscribed. Enforcing: ${currentQuality}`);
+        pub.setVideoQuality(currentQuality);
+      }
+    };
+    room.on('trackSubscribed', onTrackSubscribed);
+    return () => { room.off('trackSubscribed', onTrackSubscribed); };
+  }, [room, teacher?.identity, currentQuality]);
+
+  const resetControlsTimer = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    if (teacher) controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
+  }, [teacher]);
+
+  useEffect(() => {
+    const handleAction = () => resetControlsTimer();
+    window.addEventListener('mousemove', handleAction);
+    resetControlsTimer();
+    return () => { window.removeEventListener('mousemove', handleAction); if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); };
+  }, [resetControlsTimer]);
+
+  useStudentModeration(room, socket, setIsMicEnabled);
+
+  useEffect(() => {
+    if (!room) return;
+    
+    const autoEnable = async () => {
+      try {
+        console.log('[STUDENT-CINEMA] Auto-Enabling Media (Mic Disabled by default for Echo Prevention)...');
+        await room.localParticipant.setMicrophoneEnabled(false);
+        await room.localParticipant.setCameraEnabled(true);
+        setIsMicEnabled(false);
+        setIsCameraEnabled(true);
+      } catch (e) {
+        console.error('Failed to auto-enable media', e);
+      }
+    };
+    
+    autoEnable();
+
+    const sync = () => {
+      setIsMicEnabled(room.localParticipant.isMicrophoneEnabled);
+      setIsCameraEnabled(room.localParticipant.isCameraEnabled);
+    };
+    room.localParticipant.on('metadataChanged' as any, sync);
+    sync();
+    return () => { room.localParticipant.off('metadataChanged' as any, sync); };
+  }, [room]);
+
+  const toggleMic = async () => {
+    const newState = !isMicEnabled;
+    await room.localParticipant.setMicrophoneEnabled(newState);
+    setIsMicEnabled(newState);
+    socket?.emit(newState ? 'participant_mic_on' : 'participant_mic_off', { roomName: room.name });
+  };
+
+  const toggleCamera = async () => {
+    const newState = !isCameraEnabled;
+    await room.localParticipant.setCameraEnabled(newState);
+    setIsCameraEnabled(newState);
+  };
+
+  const toggleFullscreen = () => {
+    const el = document.getElementById('student-cinema-viewport');
+    if (!document.fullscreenElement) {
+      el?.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
+
+  const toggleQuality = () => {
+    if (!teacher) return;
+    const nextQ = currentQuality === VideoQuality.LOW ? VideoQuality.MEDIUM : (currentQuality === VideoQuality.MEDIUM ? VideoQuality.HIGH : VideoQuality.LOW);
+    setCurrentQuality(nextQ);
+    teacher.videoTrackPublications.forEach(pub => {
+      if (pub.track) pub.setVideoQuality(nextQ);
+    });
+    console.log(`[STUDENT-CINEMA] Subscriber Quality Set to: ${nextQ}`);
+  };
+
+  if (!room) return null;
+
+  return (
+    <div id="student-cinema-viewport" style={{ height: '100vh', width: '100vw', background: '#000', color: '#fff', overflow: 'hidden', position: 'fixed', top: 0, left: 0, zIndex: 9999 }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at center, #0f172a 0%, #000 100%)', zIndex: 1 }} />
+
+      <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', zIndex: 2 }}>
+        
+        {/* ENFORCED CINEMA FRAME (Adaptive Padding) */}
+        <div style={{ flex: 1, padding: isFullscreen ? '0' : '40px 60px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.5s ease' }}>
+          <div style={{ 
+            width: '100%', 
+            height: '100%', 
+            maxWidth: isFullscreen ? '100vw' : '1600px',
+            maxHeight: isFullscreen ? '100vh' : '85vh',
+            background: '#000', 
+            borderRadius: isFullscreen ? '0px' : '40px', 
+            overflow: 'hidden', 
+            position: 'relative',
+            boxShadow: isFullscreen ? 'none' : '0 60px 120px -20px rgba(0,0,0,1)',
+            border: isFullscreen ? 'none' : '2px solid rgba(99, 102, 241, 0.3)',
+            transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}>
+            {teacher ? (
+              <>
+                <VideoTrack participant={teacher} mode="main" isFullscreen={isFullscreen} onFullscreenToggle={toggleFullscreen} visible={showControls} />
+                
+                {/* LABELS INSIDE THE FRAME */}
+                <div style={{ position: 'absolute', top: isFullscreen ? '40px' : '30px', left: isFullscreen ? '40px' : '30px', zIndex: 100, opacity: showControls ? 1 : 0, transition: 'all 0.5s ease' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <div style={{ background: '#ef4444', padding: '6px 14px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', boxShadow: '0 0 15px rgba(239,68,68,0.4)' }}>LIVE</div>
+                    <span style={{ fontSize: '16px', fontWeight: '800', textShadow: '0 2px 10px rgba(0,0,0,0.8)' }}>{lecture?.title || 'Academic Session'}</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0a0a0c' }}>
+                <Loader2 className="animate-spin" size={60} color="#6366f1" />
+                <h2 style={{ marginTop: '25px', fontSize: '22px', fontWeight: '900', color: '#6366f1' }}>WAITING FOR TEACHER</h2>
+              </div>
+            )}
+          </div>
+        </div>
+
+         {/* CONTROLS BAR */}
+        <div style={{ 
+          position: 'absolute', bottom: isFullscreen ? '60px' : '40px', left: '50%', transform: `translateX(-50%) translateY(${showControls ? '0' : '40px'})`, 
+          opacity: showControls ? 1 : 0, transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 1000 
+        }}>
+          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(45px)', padding: '12px 30px', borderRadius: '35px', display: 'flex', alignItems: 'center', gap: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 30px 60px rgba(0,0,0,1)' }}>
+             <div style={{ width: '120px', height: '70px', borderRadius: '18px', overflow: 'hidden', border: '2px solid #6366f1', background: '#000' }}>
+                <VideoTrack participant={room.localParticipant} mode="pip" />
+             </div>
+             <div style={{ display: 'flex', gap: '15px' }}>
+                <button onClick={toggleMic} style={{ width: '52px', height: '52px', borderRadius: '18px', background: isMicEnabled ? '#10b981' : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {isMicEnabled ? <Mic size={24} /> : <MicOff size={24} />}
+                </button>
+                <button onClick={toggleCamera} style={{ width: '52px', height: '52px', borderRadius: '18px', background: isCameraEnabled ? '#6366f1' : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {isCameraEnabled ? <Video size={24} /> : <VideoOff size={24} />}
+                </button>
+                <button onClick={toggleQuality} style={{ width: '52px', height: '52px', borderRadius: '18px', background: currentQuality === VideoQuality.HIGH ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.1)', color: currentQuality === VideoQuality.HIGH ? '#10b981' : '#fff', border: currentQuality === VideoQuality.HIGH ? '1px solid #10b981' : 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <Gauge size={20} />
+                    <span style={{ fontSize: '9px', fontWeight: 'bold' }}>{currentQuality === 0 ? '360' : (currentQuality === 1 ? '720' : 'MAX')}</span>
+                </button>
+             </div>
+             <button onClick={onDisconnect} style={{ width: '52px', height: '52px', borderRadius: '18px', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <LogOut size={24} />
+             </button>
+          </div>
+        </div>
+
+      </div>
+
+      {/* SOVEREIGN TOAST NOTIFICATION */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '120px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.9)' : 'rgba(16, 185, 129, 0.9)',
+          backdropFilter: 'blur(15px)',
+          padding: '16px 32px',
+          borderRadius: '20px',
+          color: '#fff',
+          fontWeight: 'bold',
+          fontSize: '14px',
+          zIndex: 9999,
+          boxShadow: '0 20px 50px rgba(0,0,0,0.4)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          animation: 'toastIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+        }}>
+          {toast.msg}
+        </div>
+      )}
+
+      <style>{`
+        @keyframes toastIn {
+          from { transform: translate(-50%, 100%) scale(0.8); opacity: 0; }
+          to { transform: translate(-50%, 0) scale(1); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+};

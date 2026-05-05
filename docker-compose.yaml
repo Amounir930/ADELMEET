@@ -1,0 +1,18 @@
+version: '3.9'
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --config /livekit.yaml
+    ports:
+      - "7800:7800"
+      - "7801:7801"
+      - "7880:7880"
+    volumes:
+      - ./livekit.yaml:/livekit.yaml
+    environment:
+      - LIVEKIT_KEYS=devkey: secret
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

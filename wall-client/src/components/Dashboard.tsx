@@ -69,25 +69,28 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
 
   const executeLaunch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!launchingLecture) return;
-
-    for (let i = 0; i < numScreens; i++) {
-      const url = `/grid?lecture=${launchingLecture}&totalScreens=${numScreens}&screen=${i}`;
-      const windowFeatures = `width=800,height=600,left=${i * 50},top=${i * 50}`;
-      window.open(url, `screen_${i}`, windowFeatures);
+    if (numScreens > 0) {
+      for (let i = 0; i < numScreens; i++) {
+        const url = `/grid?lecture=${launchingLecture}&totalScreens=${numScreens}&screen=${i}`;
+        const windowFeatures = `width=800,height=600,left=${i * 50},top=${i * 50}`;
+        window.open(url, `screen_${i}`, windowFeatures);
+      }
     }
 
-    onJoin(launchingLecture, numScreens);
+    if (launchingLecture) {
+      onJoin(launchingLecture, numScreens);
+    }
     setLaunchingLecture(null);
   };
 
   return (
     <div style={{ 
-      minHeight: '100vh', 
-      background: '#020617',
+      flex: 1, 
+      background: '#0a0a0c',
       color: '#fff', 
       fontFamily: 'Outfit, sans-serif',
-      padding: '40px 20px'
+      padding: '60px 40px',
+      overflowY: 'auto'
     }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         
@@ -256,7 +259,7 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
                 value={numScreens} 
                 onChange={(e) => setNumScreens(parseInt(e.target.value) || 0)} 
                 required 
-                min="1"
+                min="0"
                 max="50"
                 style={{ padding: '15px 20px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }}
               />

@@ -69,24 +69,22 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const r = new Room({
         adaptiveStream: true,
-        dynacast: true,
-        // SOVEREIGN 720p ENGINE: Balanced for Step-by-Step Testing
+        dynacast: true, // MISSION 11: DYNAMIC UPLOAD CONTROL
         videoCaptureDefaults: {
           resolution: VideoPresets.h720.resolution, 
         },
         publishDefaults: {
-          simulcast: false,
+          simulcast: true, // MISSION 11: ENABLE MULTI-LAYER PUBLISHING
           videoCodec: 'vp8',
-          videoEncoding: VideoPresets.h360.encoding,
+          videoEncoding: VideoPresets.h720.encoding,
           dtx: true,
         },
         reconnectPolicy: {
-          nextRetryDelayInMs: () => 1000 // Fast retry
+          nextRetryDelayInMs: () => 1000 
         }
       });
 
       r.on('disconnected', (reason) => {
-        // MISSION 13: Reason 5 is ROOM_DELETED (Normal when teacher ends session)
         if (reason === 5 || reason?.toString() === '5') {
           console.log('[SOVEREIGN] Session ended normally by teacher.');
           setError(null);
@@ -105,13 +103,9 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setError(null);
       });
 
-      // Point 3: Standard failover for speed (UDP -> TCP)
-      // MISSION 13: SOVEREIGN PASSTHROUGH (Relay Forced)
+      // MISSION 12: SCALE OPTIMIZATION
       await r.connect(url, token, {
         autoSubscribe: true,
-        rtcConfig: {
-          iceTransportPolicy: 'relay', // FORCE RELAY: Bypasses most ISP blocks/violations
-        }
       });
       
       setRoom(r);

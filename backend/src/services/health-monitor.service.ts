@@ -68,8 +68,8 @@ class HealthMonitorService {
     while (this.isRunning) {
       try {
         await this.checkAllDisplays();
-      } catch (err) {
-        logger.error('[HEALTH] Monitor Loop Error:', err);
+      } catch (err: any) {
+        logger.error(`[HEALTH] Monitor Loop Error: ${err.message || err}`);
       }
       await new Promise(resolve => setTimeout(resolve, 10000));
     }

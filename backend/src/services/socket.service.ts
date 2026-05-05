@@ -5,6 +5,8 @@ import { stateService } from './state.service';
 import { healthMonitorService } from './health-monitor.service';
 import { displayAssignmentService } from './display-assignment.service';
 import { roomOrchestratorService } from './room-orchestrator.service';
+import { createAdapter } from '@socket.io/redis-adapter';
+import { createClient } from 'redis';
 
 /**
  * MISSION 12: SOVEREIGN SYNC ENGINE (SOCKET)
@@ -13,7 +15,7 @@ import { roomOrchestratorService } from './room-orchestrator.service';
 class SocketService {
   private io: Server | null = null;
 
-  init(server: HttpServer) {
+  async init(server: HttpServer) {
     this.io = new Server(server, {
       cors: {
         origin: '*',
@@ -21,6 +23,15 @@ class SocketService {
       },
       transports: ['websocket'] // SCALE MANDATE
     });
+
+    // MISSION 07: DISTRIBUTED SYNC (REDIS ADAPTER)
+    // Critical for multi-node deployments (Millions of users)
+    const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
+    const subClient = pubClient.duplicate();
+    
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    this.io.adapter(createAdapter(pubClient, subClient));
+    logger.info('[REDIS-ADAPTER] Distributed Sync Active');
 
     // Initialize Engines with Dependency Injection
     displayAssignmentService.init(this.io);
@@ -57,6 +68,13 @@ class SocketService {
 
       socket.on('teacher:force_unmute', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
         this.io?.to(roomName).emit('force_unmute', { targetIdentity });
+      });
+
+      // MISSION 12: RECORDING CONTROL
+      socket.on('teacher:toggle_recording_permission', async ({ roomName, allowed }: { roomName: string, allowed: boolean }) => {
+        logger.info(`[TEACHER-COMMAND] Recording permission set to ${allowed} for room: ${roomName}`);
+        await stateService.setRoomState(roomName, { isRecordingAllowed: allowed });
+        this.io?.to(roomName).emit('recording_permission_changed', { allowed });
       });
 
       // MISSION 12: DISPLAY ORCHESTRATION

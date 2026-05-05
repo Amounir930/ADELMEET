@@ -1,124 +1,121 @@
-# Component 12: Recording & Playback
-## المكون: تسجيل المحاضرات وإعادة تشغيلها
+Component 12: Local Recording & Permission Control
+المكون: التسجيل المحلي وإدارة الصلاحيات (Zero-Server-Load)
+الهدف
+تمكين المعلم من تسجيل المحاضرة محلياً بأعلى جودة عبر تطبيق القاعة (Electron)، وتمكين الطلاب من تسجيل المحاضرة من المتصفح (مربوطاً بجودة البث الخاصة بهم) بشرط حصولهم على إذن لحظي من المعلم. الملفات تُحفظ مباشرة على الأجهزة الشخصية للمستخدمين لضمان 0% ضغط على سيرفرات المنصة وتوفير 100% من تكاليف التسجيل السحابي.
 
----
+الموقع في المشروع
+backend/src/services/socket.service.ts           ← بث صلاحيات التسجيل
+backend/src/services/state.service.ts            ← حفظ حالة السماح بالتسجيل في Redis
+student-client/src/hooks/useLocalRecorder.ts     ← محرك التسجيل المحلي (MediaRecorder)
+student-client/src/components/StudentCinema.tsx  ← زر التسجيل للطالب (يظهر ويختفي حسب الصلاحية)
+wall-client/src/components/TeacherDashboard.tsx  ← أزرار التسجيل للمعلم + زر التحكم بصلاحية الطلاب
+معمارية التسجيل (The Workflow)
+1. تسجيل المعلم (الأساس - عبر Electron/Browser)
+التقنية: استخدام MediaRecorder API.
 
-## الهدف
-تسجيل بث المعلم (وبعض الطلاب اختيارياً) أثناء المحاضرة، وحفظ التسجيل للمشاهدة لاحقاً.
+الآلية: يتم التقاط مسار شاشة المعلم (Screen Share) ومسار الصوت (Microphone)، ودمجهما في ملف فيديو واحد.
 
----
+الميزة: يمكن للمعلم إيقاف التسجيل وبدء تسجيل جديد في نفس المحاضرة (تسجيل مجزأ) لحفظ الذاكرة، ويتم تحميل الملف (.webm أو .mp4) مباشرة على جهاز المعلم.
 
-## الموقع في المشروع
-```
-backend/src/services/recording.service.ts        ← خدمة التسجيل
-backend/src/models/Recording.ts                  ← نموذج التسجيل
-backend/src/routes/recording.routes.ts           ← API endpoints
-wall-client/src/components/RecordingControls.tsx  ← أزرار التسجيل للمعلم
-student-client/src/pages/RecordingsPage.tsx       ← صفحة المشاهدة
-```
+2. تسجيل الطالب (التابع - عبر Browser)
+التقنية: MediaRecorder API داخل متصفح الطالب.
 
----
+الآلية: المتصفح يسجل ما يستقبله الطالب حالياً. بفضل نظام (Simulcast)، إذا كان الطالب يختار جودة (360p)، سيتم تسجيل الفيديو بحجم صغير جداً.
 
-## طرق التسجيل المتاحة
+الذاكرة: التسجيل يعمل بنظام "الجلسات" (Sessions) لمنع امتلاء رامات (RAM) جهاز الطالب. كل ضغطة "إيقاف" تُنزل ملفاً مستقلاً.
 
-### الطريقة 1: LiveKit Egress (الموصى بها)
-LiveKit يوفر خدمة Egress مدمجة تسجل الغرفة server-side:
+3. نظام التحكم في الصلاحيات (Permission Engine)
+يقوم المعلم بتفعيل/إلغاء خيار "السماح للطلاب بالتسجيل".
 
-```typescript
-// backend/src/services/recording.service.ts
-import { EgressClient, EncodedFileOutput } from 'livekit-server-sdk';
+السيرفر يرسل حدث recording_permission_changed عبر الـ Socket.
 
-class RecordingService {
-  private egressClient: EgressClient;
-  
-  constructor() {
-    this.egressClient = new EgressClient(
-      process.env.LIVEKIT_URL!,
-      process.env.LIVEKIT_API_KEY!,
-      process.env.LIVEKIT_API_SECRET!
-    );
-  }
-  
-  // بدء تسجيل
-  async startRecording(roomName: string, lectureId: string): Promise<string> {
-    const output = new EncodedFileOutput({
-      fileType: 'mp4',
-      filepath: `/recordings/${lectureId}/{room_name}-{time}.mp4`,
-      // يمكن الحفظ في S3/GCS:
-      // s3: { bucket: 'sovereign-recordings', region: 'me-south-1' }
-    });
-    
-    const info = await this.egressClient.startRoomCompositeEgress(
-      roomName,
-      { file: output },
-      {
-        layout: 'grid',               // تخطيط الفيديو
-        customBaseUrl: '',             // يمكن استخدام template مخصص
-        audioOnly: false,
-        videoOnly: false,
-      }
-    );
-    
-    return info.egressId;
-  }
-  
-  // إيقاف تسجيل
-  async stopRecording(egressId: string): Promise<void> {
-    await this.egressClient.stopEgress(egressId);
-  }
-  
-  // قائمة التسجيلات
-  async listRecordings(lectureId: string): Promise<Recording[]> {
-    return await Recording.find({ lectureId }).sort({ createdAt: -1 });
-  }
+إذا قام المعلم بـ إلغاء الصلاحية أثناء قيام طالب بالتسجيل، يقوم كود الطالب بإجبار المتصفح على (إيقاف التسجيل + تحميل الملف الحالي فوراً + إخفاء زر التسجيل).
+
+الأكواد الأساسية (المنطق البرمجي)
+1. تحديث حالة الغرفة في Redis (Backend)
+TypeScript
+// يضاف إلى RoomState interface في state.service.ts
+export interface RoomState {
+  isMuted: boolean;
+  isRecordingAllowed: boolean; // ← إضافة حالة التسجيل
+  lectureId?: string;
+  roomName: string;
+  status: 'live' | 'completed';
 }
-```
+2. أحداث السوكيت (Backend)
+TypeScript
+// داخل socket.service.ts (Teacher Commands)
+socket.on('teacher:toggle_recording_permission', async ({ roomName, allowed }: { roomName: string, allowed: boolean }) => {
+  logger.info(`[TEACHER-COMMAND] Recording permission set to ${allowed} for room: ${roomName}`);
+  await stateService.setRoomState(roomName, { isRecordingAllowed: allowed });
+  this.io?.to(roomName).emit('recording_permission_changed', { allowed });
+});
+3. محرك التسجيل المحلي (Frontend Custom Hook)
+TypeScript
+// student-client/src/hooks/useLocalRecorder.ts
+import { useState, useRef, useCallback } from 'react';
 
----
+export const useLocalRecorder = (mediaStream: MediaStream | null) => {
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
-## نموذج البيانات
+  const startRecording = useCallback(() => {
+    if (!mediaStream) return;
+    chunksRef.current = [];
+    const recorder = new MediaRecorder(mediaStream, { mimeType: 'video/webm; codecs=vp9' });
+    
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
 
-```typescript
-// backend/src/models/Recording.ts
-const recordingSchema = new mongoose.Schema({
-  lectureId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lecture', required: true },
-  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  roomName: { type: String, required: true },
-  egressId: { type: String },                    // LiveKit Egress ID
-  filePath: { type: String },                     // مسار الملف
-  fileUrl: { type: String },                      // رابط المشاهدة
-  duration: { type: Number },                     // المدة بالثواني
-  fileSize: { type: Number },                     // الحجم بالبايت
-  status: { type: String, enum: ['recording', 'processing', 'ready', 'failed'], default: 'recording' },
-}, { timestamps: true });
-```
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Lecture_Part_${Date.now()}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
 
----
+    recorder.start(1000); // تجميع البيانات كل ثانية لحماية الرام
+    mediaRecorderRef.current = recorder;
+    setIsRecording(true);
+  }, [mediaStream]);
 
-## API Endpoints
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, []);
 
-```
-POST   /api/recordings/start      ← بدء تسجيل (المعلم فقط)
-POST   /api/recordings/stop       ← إيقاف تسجيل
-GET    /api/recordings/:lectureId ← قائمة تسجيلات محاضرة
-GET    /api/recordings/:id/stream ← مشاهدة تسجيل (streaming)
-DELETE /api/recordings/:id        ← حذف تسجيل
-```
+  return { isRecording, startRecording, stopRecording };
+};
+واجهة المستخدم (UI Controls)
+واجهة المعلم (Teacher Dashboard)
+Plaintext
+┌────────────────────────────────────────────────────────┐
+│  ⏺️ تسجيل المحاضرة (محلي)     [ 🔴 إيقاف التسجيل ]         │
+│  🔒 السماح للطلاب بالتسجيل: [ مفعّل ✅ ] / [ معطّل ❌ ]    │
+└────────────────────────────────────────────────────────┘
+واجهة الطالب (Student Cinema)
+إذا كانت الصلاحية (معطّلة): لا يظهر أي زر للتسجيل.
 
----
+إذا كانت الصلاحية (مفعّلة):
 
-## واجهة المعلم (أزرار التسجيل)
-```
+Plaintext
 ┌─────────────────────────────────────┐
-│  ⏺️ REC  00:45:23   [ ⏹ STOP ]    │
+│  ⏺️ بدء التسجيل المحلي               │
 └─────────────────────────────────────┘
-```
+معايير القبول (Acceptance Criteria)
+✅ Zero Server Load: عملية دمج وتسجيل الفيديو تتم 100% داخل أجهزة المستخدمين دون المساس بـ Backend أو LiveKit Cloud.
 
----
+✅ تسجيل مجزأ (Chunking): يمكن للمستخدم إيقاف وبدء التسجيل عدة مرات، وينتج عن كل مرة ملف مستقل.
 
-## معايير القبول
-1. ✅ المعلم يبدأ التسجيل بزر واحد
-2. ✅ التسجيل يشمل فيديو المعلم + صوت
-3. ✅ الملف يُحفظ بصيغة MP4
-4. ✅ الطلاب يمكنهم مشاهدة التسجيلات السابقة
-5. ✅ التسجيل لا يؤثر على أداء البث المباشر
+✅ تحكم مطلق للمعلم: الصلاحية بيد المعلم لحظياً (Real-time Toggle).
+
+✅ حماية السحب (Revoke Protection): إذا سحب المعلم الإذن أثناء تسجيل الطالب، ينتهي التسجيل فوراً ويُحفظ ما تم تسجيله حتى تلك اللحظة على جهاز الطالب.
+
+✅ توافق الجودة: تسجيل الطالب يعكس جودة الـ Simulcast التي يستقبلها (Low/Medium/High).

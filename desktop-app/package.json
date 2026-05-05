@@ -1,0 +1,26 @@
+{
+  "name": "sovereign-desktop",
+  "version": "1.0.0",
+  "description": "Smart Classroom Multi-Screen Orchestrator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder",
+    "dist": "electron-builder --win"
+  },
+  "keywords": [
+    "electron",
+    "classroom",
+    "multi-screen",
+    "orchestration"
+  ],
+  "author": "Antigravity",
+  "license": "MIT",
+  "dependencies": {
+    "electron-is-dev": "^2.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}

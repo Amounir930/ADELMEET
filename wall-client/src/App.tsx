@@ -10,6 +10,7 @@ import { VideoRoom } from './components/VideoRoom';
 import { GridPage } from './components/GridPage';
 import { ScreenLauncher } from './components/ScreenLauncher';
 import { Loader2 } from 'lucide-react';
+import TitleBar from './components/TitleBar';
 
 
 const AppRoutes: React.FC = () => {
@@ -30,7 +31,8 @@ const AppRoutes: React.FC = () => {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div style={{ width: '100vw', height: '100vh', position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <TitleBar />
       {/* State Debugger (Small, Bottom Left) */}
       <div style={{ position: 'fixed', bottom: 10, left: 10, fontSize: '9px', opacity: 0.2, zIndex: 999 }}>
         U:{user ? 'Y' : 'N'} | L:{currentLecture ? 'Y' : 'N'}

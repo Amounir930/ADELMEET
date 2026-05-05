@@ -65,7 +65,7 @@ const startServer = async () => {
     await connectRedis(); // MISSION 07: Distributed State
     
     // Initialize Socket.io AFTER infra is ready
-    socketService.init(server);
+    await socketService.init(server);
     
     server.listen(port, () => {
       logger.info(`[SERVER] Backend running on port ${port} (Socket.io & Redis Active)`);

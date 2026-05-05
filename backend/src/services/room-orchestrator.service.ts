@@ -56,9 +56,9 @@ class RoomOrchestratorService {
    */
   async computeAssignment(lectureId: string) {
     const displays = await Display.find({ lectureId, status: 'online' }).sort('displayIndex');
-    const assignments = displayAssignmentService.getAssignments(lectureId);
+    const assignments = await displayAssignmentService.getAssignments(lectureId);
 
-    const totalStudents = assignments.reduce((s, a) => s + a.students.length, 0);
+    const totalStudents = Object.values(assignments).reduce((s: number, students: string[]) => s + students.length, 0);
 
     return {
       lectureId,
@@ -66,13 +66,13 @@ class RoomOrchestratorService {
       totalScreens: displays.length,
       studentsPerScreen: displays.length ? Math.ceil(totalStudents / displays.length) : 0,
       screens: displays.map(d => {
-        const assignment = assignments.find(a => a.screenIndex === d.displayIndex);
+        const students = assignments[`screen:${d.displayIndex}`] ?? [];
         return {
           screenIndex: d.displayIndex,
           hardwareId: d.hardwareId,
           status: d.status,
-          students: assignment?.students ?? [],
-          studentCount: assignment?.students.length ?? 0,
+          students: students,
+          studentCount: students.length,
           lastHeartbeat: d.lastHeartbeat,
           isAlive: (Date.now() - new Date(d.lastHeartbeat).getTime()) < 30_000
         };
@@ -161,7 +161,7 @@ export const roomOrchestratorService = new RoomOrchestratorService();
 
 // Start the offline-detection watchdog (every 15 seconds)
 setInterval(() => {
-  roomOrchestratorService.detectOfflineDisplays().catch(err =>
-    logger.error('[ORCHESTRATOR] Offline detection error:', err)
+  roomOrchestratorService.detectOfflineDisplays().catch((err: any) =>
+    logger.error(`[ORCHESTRATOR] Offline detection error: ${err.message || err}`)
   );
 }, 15_000);

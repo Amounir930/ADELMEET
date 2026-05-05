@@ -7,6 +7,7 @@ import logger from '../infra/logger';
  */
 export interface RoomState {
   isMuted: boolean;
+  isRecordingAllowed: boolean;
   lectureId?: string;
   roomName: string;
   status: 'live' | 'completed';
@@ -32,8 +33,8 @@ class StateService {
         await redisClient.hSet(key, flatEntries);
         await redisClient.expire(key, 86400); // 24h
       }
-    } catch (err) {
-      logger.error(`[STATE] Failed to set room state for ${roomName}:`, err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to set room state for ${roomName}: ${err.message || err}`);
     }
   }
 
@@ -45,12 +46,13 @@ class StateService {
 
       return {
         isMuted: data.isMuted === 'true',
+        isRecordingAllowed: data.isRecordingAllowed === 'true',
         lectureId: data.lectureId,
         roomName: data.roomName,
         status: data.status as any
       };
-    } catch (err) {
-      logger.error(`[STATE] Failed to get room state for ${roomName}:`, err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to get room state for ${roomName}: ${err.message || err}`);
       return null;
     }
   }
@@ -61,8 +63,8 @@ class StateService {
     try {
       await redisClient.hSet(key, `screen:${screenIndex}`, JSON.stringify(students));
       await redisClient.expire(key, 86400);
-    } catch (err) {
-      logger.error(`[STATE] Failed to set assignment for ${roomName} screen ${screenIndex}:`, err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to set assignment for ${roomName} screen ${screenIndex}: ${err.message || err}`);
     }
   }
 
@@ -71,8 +73,8 @@ class StateService {
     try {
       const data = await redisClient.hGet(key, `screen:${screenIndex}`);
       return data ? JSON.parse(data) : [];
-    } catch (err) {
-      logger.error(`[STATE] Failed to get assignment for ${roomName} screen ${screenIndex}:`, err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to get assignment for ${roomName} screen ${screenIndex}: ${err.message || err}`);
       return [];
     }
   }
@@ -105,8 +107,8 @@ class StateService {
       
       // MISSION 07 FIX: Track active hardware IDs in a Set to avoid KEYS *
       await redisClient.sAdd(this.ACTIVE_DISPLAYS_KEY, hardwareId);
-    } catch (err) {
-      logger.error(`[STATE] Failed to update health for ${hardwareId}:`, err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to update health for ${hardwareId}: ${err.message || err}`);
     }
   }
 
@@ -135,8 +137,8 @@ class StateService {
       }
       
       return results;
-    } catch (err) {
-      logger.error('[STATE] Failed to fetch all health records:', err);
+    } catch (err: any) {
+      logger.error(`[STATE] Failed to fetch all health records: ${err.message || err}`);
       return {};
     }
   }

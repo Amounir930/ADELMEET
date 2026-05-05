@@ -49,8 +49,8 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
       console.log(`[STUDENT-VIDEO-TRACK] Resolving Media for ${participant.identity} (Local: ${participant.isLocal})`);
 
       // MISSION 12: AGGRESSIVE TRACK DISCOVERY (LOCAL + REMOTE)
-      const vTrack = participant.getTrackPublication(Track.Source.Camera)?.videoTrack ||
-        participant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack ||
+      const vTrack = participant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack ||
+        participant.getTrackPublication(Track.Source.Camera)?.videoTrack ||
         Array.from(participant.videoTrackPublications.values())[0]?.videoTrack;
 
       const aTrack = participant.getTrackPublication(Track.Source.Microphone)?.audioTrack ||

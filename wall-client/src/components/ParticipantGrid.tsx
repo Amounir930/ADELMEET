@@ -1,40 +1,31 @@
 import React from 'react';
-import { RemoteParticipant } from 'livekit-client';
+import { RemoteParticipant, Room } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
-
-interface ParticipantGridProps {
-  participants: RemoteParticipant[];
-  showUserTags?: boolean;
-}
-
-import { useSocket } from '../contexts/SocketContext';
-import { Mic, MicOff, UserMinus } from 'lucide-react';
+import { UserMinus } from 'lucide-react';
 
 interface ParticipantGridProps {
   participants: RemoteParticipant[];
   showUserTags?: boolean;
   onKick?: (identity: string) => void;
-  room: any;
+  room: Room;
 }
 
+/**
+ * MISSION 12: SOVEREIGN GRID ORCHESTRATOR
+ * Optimized to prevent distortion on wide displays.
+ * Enforces cinematic aspect ratios.
+ */
 export const ParticipantGrid: React.FC<ParticipantGridProps> = ({ participants, room, onKick }) => {
-  const { socket } = useSocket();
   
   const getGridLayout = () => {
     const n = participants.length;
-    if (n <= 1) return { columns: '1fr', rows: '1fr' };
+    if (n === 0) return { columns: '1fr', rows: '1fr' };
     
     const isPortrait = window.innerHeight > window.innerWidth;
     
-    if (n === 2) {
-      return isPortrait 
-        ? { columns: '1fr', rows: '1fr 1fr' } 
-        : { columns: '1fr 1fr', rows: '1fr' };
-    }
-    
-    // Geometric optimization for N > 2
+    // Geometric optimization
     let cols = Math.ceil(Math.sqrt(n));
-    if (isPortrait && n > 2) cols = Math.floor(Math.sqrt(n)); // Prioritize rows in portrait
+    if (isPortrait && n > 2) cols = Math.floor(Math.sqrt(n));
     const rows = Math.ceil(n / cols);
     
     return {
@@ -50,71 +41,57 @@ export const ParticipantGrid: React.FC<ParticipantGridProps> = ({ participants, 
       display: 'grid',
       gridTemplateColumns: layout.columns,
       gridTemplateRows: layout.rows,
-      gap: '2px',
+      gap: '15px',
       width: '100%',
       height: '100%',
-      background: '#000',
-      overflow: 'hidden'
+      background: 'transparent',
+      overflow: 'hidden',
+      padding: '10px',
+      placeItems: 'center'
     }}>
       {participants.map((p) => (
         <div key={p.identity} style={{ 
           position: 'relative', 
           overflow: 'hidden', 
-          background: '#0f172a',
-          border: '1px solid rgba(255,255,255,0.03)'
+          background: '#0a0a0c',
+          borderRadius: '24px',
+          border: '1px solid rgba(255,255,255,0.05)',
+          boxShadow: '0 15px 35px rgba(0,0,0,0.5)',
+          width: '100%',
+          height: '100%',
+          maxWidth: '100%',
+          maxHeight: '100%',
+          aspectRatio: '16 / 9',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
         }}>
           <VideoTrack participant={p} room={room} mode="grid" />
           
           {/* SOVEREIGN MINI-OVERLAY */}
-          <div style={{ position: 'absolute', bottom: '10px', left: '10px', right: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
-            <div style={{ background: 'rgba(0,0,0,0.5)', padding: '4px 10px', borderRadius: '8px', backdropFilter: 'blur(5px)' }}>
-              <span style={{ color: 'white', fontSize: '10px', fontWeight: 'bold' }}>{p.name || p.identity.split('_')[0]}</span>
+          <div style={{ position: 'absolute', bottom: '15px', left: '15px', right: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+            <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '6px 14px', borderRadius: '10px', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>{p.name || p.identity.split('_')[0]}</span>
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                onClick={() => {
-                  const isMuted = !p.isMicrophoneEnabled;
-                  socket?.emit(isMuted ? 'teacher:force_unmute' : 'teacher:force_mute', { roomName: room.name, targetIdentity: p.identity });
-                }}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: p.isMicrophoneEnabled ? '#22c55e' : '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                {p.isMicrophoneEnabled ? <Mic size={14} /> : <MicOff size={14} />}
-              </button>
-
-              <button
-                onClick={() => onKick?.(p.identity)}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: 'rgba(239, 68, 68, 0.2)',
-                  color: '#ef4444',
-                  border: '1px solid #ef4444',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 10px rgba(239, 68, 68, 0.1)',
-                  transition: 'all 0.2s ease'
-                }}
-                title="Kick & Ban Student"
-              >
-                <UserMinus size={14} />
-              </button>
-            </div>
+            <button
+              onClick={() => onKick?.(p.identity)}
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '12px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                color: '#ef4444',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.3s ease'
+              }}
+              title="Kick & Ban"
+            >
+              <UserMinus size={16} />
+            </button>
           </div>
         </div>
       ))}

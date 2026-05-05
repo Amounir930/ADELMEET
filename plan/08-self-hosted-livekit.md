@@ -1,5 +1,8 @@
-# Component 08: Self-Hosted LiveKit SFU
-## المكون: نشر خادم LiveKit SFU خاص
+# Component 08: Self-Hosted LiveKit SFU (DEFERRED / مؤجل)
+
+> [!CAUTION]
+> **تم تأجيل هذا المكون بناءً على قرار هندسي لتجنب تداخل الأخطاء.**
+> يرجى الرجوع إلى الملف [14-deferred-livekit-optimization.md](file:///C:/Users/Dell/Desktop/learn/meet-2/plan/14-deferred-livekit-optimization.md) لمعرفة الأسباب الفنية والخطة البديلة.
 
 ---
 

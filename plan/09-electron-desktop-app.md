@@ -1,154 +1,60 @@
-# Component 09: Electron Desktop App
-## المكون: تطبيق سطح المكتب (Electron)
+# Component 09: Electron Desktop App (Dumb Kiosk Mode)
+
+## المكون: تطبيق سطح المكتب لإدارة الشاشات المتعددة تلقائياً
 
 ---
 
-## الهدف
-تطبيق يعمل على كمبيوتر القاعة، يكتشف جميع الشاشات المتصلة تلقائياً، ويفتح نافذة fullscreen على كل شاشة — الشاشة الرئيسية للمعلم (Teacher Dashboard)، والباقي لعرض الطلاب (GridPage).
+## الفلسفة المعمارية (The Architecture)
+بدلاً من التحكم اليدوي بفتح 15 متصفحاً، يقوم تطبيق Electron باكتشاف الشاشات الفيزيائية وفتح واجهات العرض عليها تلقائياً. 
+**القاعدة الذهبية:** التطبيق "غبي" (Dumb Client)؛ هو فقط يفتح النافذة ويمرر هويتها، بينما يتحكم الـ **Backend** (عبر Redis و Sockets) في ما يتم عرضه.
 
 ---
 
-## الموقع في المشروع
+## المميزات الأساسية
+1. **Auto-Discovery:** اكتشاف جميع الشاشات المتصلة بالجهاز فورياً.
+2. **Multi-Window Sync:** فتح نافذة `Teacher Dashboard` على الشاشة الرئيسية، ونوافذ `GridPage` على الشاشات الثانوية.
+3. **Kiosk Mode:** منع الطلاب أو المتطفلين من إغلاق النوافذ أو الخروج من وضع ملء الشاشة.
+4. **Auto-Start:** التشغيل التلقائي مع إقلاع نظام ويندوز.
+
+---
+
+## هيكل الملفات
 ```
-sovereign-desktop/
-├── package.json
-├── main.js                    ← Electron Main Process
-├── preload.js                 ← Security bridge
-├── screen-manager.js          ← اكتشاف وإدارة الشاشات
-├── auto-updater.js            ← تحديث تلقائي
-└── assets/
-    └── icon.png
-```
-
----
-
-## الملف الرئيسي: main.js
-
-```javascript
-const { app, BrowserWindow, screen, ipcMain } = require('electron');
-
-const BASE_URL = 'https://wall.60sec.shop';
-let controlWindow = null;
-let displayWindows = [];
-
-app.whenReady().then(() => {
-  const displays = screen.getAllDisplays();
-  const primary = screen.getPrimaryDisplay();
-  
-  console.log(`[SOVEREIGN] Detected ${displays.length} displays`);
-  
-  // 1. الشاشة الرئيسية = Teacher Dashboard
-  controlWindow = new BrowserWindow({
-    x: primary.bounds.x,
-    y: primary.bounds.y,
-    width: primary.bounds.width,
-    height: primary.bounds.height,
-    fullscreen: true,
-    title: 'Sovereign Command Center',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  controlWindow.loadURL(BASE_URL);
-  
-  // 2. باقي الشاشات = GridPage
-  const secondaryDisplays = displays.filter(d => d.id !== primary.id);
-  
-  secondaryDisplays.forEach((display, index) => {
-    const win = new BrowserWindow({
-      x: display.bounds.x,
-      y: display.bounds.y,
-      width: display.bounds.width,
-      height: display.bounds.height,
-      fullscreen: true,
-      frame: false,              // بدون شريط عنوان
-      kiosk: true,               // وضع Kiosk
-      closable: false,           // لا يمكن إغلاقها
-      title: `Screen ${index + 1}`,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false
-      }
-    });
-    
-    // URL يتحدد بعد أن يختار المعلم المحاضرة
-    win.loadURL(`${BASE_URL}/grid?screen=${index}&count=4`);
-    displayWindows.push(win);
-  });
-});
-
-// التواصل بين الشاشة الرئيسية وشاشات العرض
-ipcMain.on('launch-lecture', (event, { lectureId, studentsPerScreen }) => {
-  displayWindows.forEach((win, index) => {
-    const start = index * studentsPerScreen;
-    win.loadURL(`${BASE_URL}/grid?lecture=${lectureId}&start=${start}&count=${studentsPerScreen}&screen=${index}`);
-  });
-});
-
-ipcMain.on('close-all-displays', () => {
-  displayWindows.forEach(win => {
-    win.loadURL(`${BASE_URL}/grid?idle=true`);
-  });
-});
+desktop-app/
+├── package.json          ← الإعدادات والاعتمادات
+├── main.js              ← المحرك الأساسي (إدارة النوافذ والشاشات)
+└── preload.js           ← جسر التواصل (اختياري)
 ```
 
 ---
 
-## Auto-Start (Windows)
+## منطق توزيع الشاشات (main.js)
+يقوم التطبيق بالمرور على جميع الشاشات المكتشفة (`screen.getAllDisplays()`) ويقوم بفتح رابط مخصص لكل منها:
 
-```javascript
-// auto-start.js — تسجيل التطبيق ليعمل عند بدء Windows
-const { app } = require('electron');
+*   **للشاشة الرئيسية:** `BASE_URL/teacher`
+*   **للشاشات الثانوية:** `BASE_URL/grid?screenIndex=N&hardwareId=HOSTNAME`
 
-app.setLoginItemSettings({
-  openAtLogin: true,
-  path: app.getPath('exe'),
-  args: ['--autostart']
-});
+بمجرد تحميل صفحة `GridPage` في Electron، تقوم الصفحة بقراءة هذه البارامترات والاشتراك في "غرفة التحكم" عبر Socket.io، ومن هناك يستطيع السيرفر إرسال أوامر إعادة التوزيع (Rebalance) لها.
+
+---
+
+## التعليمات البرمجية للتشغيل
+
+```bash
+# 1. الدخول للمجلد
+cd desktop-app
+
+# 2. تثبيت الاعتمادات
+npm install
+
+# 3. التشغيل في وضع التطوير
+npm start
 ```
 
 ---
 
-## بناء التطبيق
-
-```json
-// package.json
-{
-  "name": "sovereign-desktop",
-  "version": "1.0.0",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "build": "electron-builder --win --x64",
-    "build:installer": "electron-builder --win nsis"
-  },
-  "build": {
-    "appId": "com.sovereign.classroom",
-    "productName": "Sovereign Classroom",
-    "win": {
-      "target": ["nsis", "portable"],
-      "icon": "assets/icon.png"
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": true
-    }
-  },
-  "devDependencies": {
-    "electron": "^28.0.0",
-    "electron-builder": "^24.0.0"
-  }
-}
-```
-
----
-
-## معايير القبول
-1. ✅ التطبيق يكتشف كل الشاشات المتصلة تلقائياً
-2. ✅ نافذة fullscreen على كل شاشة بدون شريط عنوان
-3. ✅ الشاشة الرئيسية = Teacher Dashboard
-4. ✅ اختيار محاضرة → كل الشاشات تتحدث تلقائياً
-5. ✅ يعمل تلقائياً عند تشغيل الكمبيوتر
-6. ✅ يُنشئ ملف .exe قابل للتثبيت
+## معايير القبول (Success Metrics)
+1. ✅ فتح جميع الشاشات في وضع Fullscreen بضغطة واحدة.
+2. ✅ نجاح قراءة `hardwareId` (اسم الكمبيوتر) وإرساله للسيرفر.
+3. ✅ عدم تعليق التطبيق (Crash) عند فصل أو توصيل شاشة أثناء التشغيل.
+4. ✅ العمل تلقائياً عند إعادة تشغيل الكمبيوتر.

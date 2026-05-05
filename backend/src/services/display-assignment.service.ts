@@ -133,6 +133,10 @@ class DisplayAssignmentService {
 
     logger.info(`[DISPLAY-ENGINE] Assignment broadcast → ${roomName} (${totalStudents} students, ${totalScreens} screens)`);
   }
+
+  async getAssignments(roomName: string) {
+    return await stateService.getAllAssignmentsForRoom(roomName);
+  }
 }
 
 export const displayAssignmentService = new DisplayAssignmentService();

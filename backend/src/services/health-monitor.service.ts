@@ -1,11 +1,6 @@
 import { Server as SocketServer } from 'socket.io';
 import logger from '../infra/logger';
-
-/**
- * MISSION 05: SOVEREIGN HEALTH MONITOR
- * Tracks per-screen health metrics from heartbeats.
- * Detects offline / warning states and broadcasts alerts to the teacher.
- */
+import { stateService } from './state.service';
 
 export type ScreenStatus = 'online' | 'warning' | 'offline';
 
@@ -18,116 +13,107 @@ export interface ScreenMetrics {
   errors: number;
 }
 
-export interface DisplayHealth {
-  hardwareId: string;
-  screenIndex: number;
-  lectureId: string;
-  roomName: string;
-  status: ScreenStatus;
-  metrics: ScreenMetrics;
-  lastHeartbeat: number;   // epoch ms
-  alertSent: boolean;
-}
-
 class HealthMonitorService {
   private io: SocketServer | null = null;
-  private displayStates: Map<string, DisplayHealth> = new Map();
-  private monitorInterval: ReturnType<typeof setInterval> | null = null;
+  private assignmentService: any = null; // Dependency Injection
+  private isRunning = false;
 
   // ─── INIT ──────────────────────────────────────────────────────────────────
 
-  init(io: SocketServer) {
+  init(io: SocketServer, assignmentService: any) {
     this.io = io;
-    this.startMonitoring();
-    logger.info('[HEALTH] Sovereign Health Monitor Active — checking every 10s');
+    this.assignmentService = assignmentService;
+    if (!this.isRunning) {
+      this.isRunning = true;
+      this.startMonitoring();
+    }
+    logger.info('[HEALTH] Sovereign Health Monitor Active — Redis-backed & DI Integrated');
   }
 
   // ─── HEARTBEAT INGESTION ───────────────────────────────────────────────────
 
-  ingestHeartbeat(data: {
+  async ingestHeartbeat(data: {
     hardwareId: string;
     screenIndex: number;
     lectureId: string;
     roomName: string;
     metrics?: Partial<ScreenMetrics>;
   }) {
-    const existing = this.displayStates.get(data.hardwareId);
+    // MISSION 07: Fetch existing state from Redis
+    const allHealth = await stateService.getAllHealth();
+    const existing = allHealth[data.hardwareId];
+    
     const defaultMetrics: ScreenMetrics = { cpu: 0, ram: 0, fps: 30, bandwidth: 0, studentsRendered: 0, errors: 0 };
 
     // MISSION 06: AUTOMATIC RECOVERY
-    if (existing && existing.status === 'offline') {
+    if (existing && existing.status === 'offline' && this.assignmentService) {
       logger.info(`[HEALTH] Display ${data.hardwareId} recovered. Re-registering for rebalance.`);
-      try {
-        const { displayAssignmentService } = require('./display-assignment.service');
-        displayAssignmentService.registerScreen(data.roomName, data.screenIndex);
-      } catch (err) {
-        logger.error(`[HEALTH] Recovery rebalance failed for ${data.hardwareId}: ${err}`);
-      }
+      this.assignmentService.registerScreen(data.roomName, Number(data.screenIndex)).catch(() => {});
     }
 
-    const updated: DisplayHealth = {
-      hardwareId: data.hardwareId,
+    const updatedMetrics = { ...defaultMetrics, ...(existing?.metrics ?? {}), ...(data.metrics ?? {}) };
+    
+    await stateService.updateHealth(data.hardwareId, {
       screenIndex: data.screenIndex,
       lectureId: data.lectureId,
       roomName: data.roomName,
       status: 'online',
-      metrics: { ...defaultMetrics, ...(existing?.metrics ?? {}), ...(data.metrics ?? {}) },
-      lastHeartbeat: Date.now(),
-      alertSent: false,   // reset alert flag on fresh heartbeat
-    };
-
-    this.displayStates.set(data.hardwareId, updated);
+      metrics: updatedMetrics
+    });
   }
 
   // ─── MONITORING LOOP ───────────────────────────────────────────────────────
 
-  startMonitoring() {
-    if (this.monitorInterval) clearInterval(this.monitorInterval);
-    this.monitorInterval = setInterval(() => this.checkAllDisplays(), 10_000);
+  private async startMonitoring() {
+    while (this.isRunning) {
+      try {
+        await this.checkAllDisplays();
+      } catch (err) {
+        logger.error('[HEALTH] Monitor Loop Error:', err);
+      }
+      await new Promise(resolve => setTimeout(resolve, 10000));
+    }
   }
 
-  private checkAllDisplays() {
+  private async checkAllDisplays() {
+    const allHealth = await stateService.getAllHealth();
     const now = Date.now();
 
-    this.displayStates.forEach((state, hardwareId) => {
-      const age = now - state.lastHeartbeat;
+    for (const [hardwareId, state] of Object.entries(allHealth)) {
+      const lastSeen = Number(state.lastSeen);
+      const age = now - lastSeen;
+      let newStatus: ScreenStatus = state.status as ScreenStatus;
 
-      if (age > 15_000) {
-        // > 15s without heartbeat → offline
+      if (age > 15000) {
         if (state.status !== 'offline') {
-          state.status = 'offline';
-          this.triggerAlert(hardwareId, 'OFFLINE');
+          newStatus = 'offline';
+          await this.triggerAlert(hardwareId, state.roomName, Number(state.screenIndex), 'OFFLINE');
         }
-      } else if (age > 10_000 || state.metrics.cpu > 90) {
-        // 10-15s stale OR high CPU → warning
-        state.status = 'warning';
-        if (state.metrics.cpu > 90 && !state.alertSent) {
-          this.triggerAlert(hardwareId, 'HIGH_CPU');
-          state.alertSent = true;
-        }
+      } else if (age > 10000 || Number(state.cpu) > 90) {
+        newStatus = 'warning';
       } else {
-        state.status = 'online';
-        state.alertSent = false;
+        newStatus = 'online';
       }
-    });
 
-    // Push updated status to teachers watching each room
-    this.broadcastStatus();
+      if (newStatus !== state.status) {
+        await stateService.updateHealth(hardwareId, { status: newStatus });
+      }
+    }
+
+    await this.broadcastStatus();
   }
 
   // ─── ALERTS ────────────────────────────────────────────────────────────────
 
-  private triggerAlert(hardwareId: string, type: 'OFFLINE' | 'HIGH_CPU' | 'ERROR') {
-    const state = this.displayStates.get(hardwareId);
+  private async triggerAlert(hardwareId: string, roomName: string, screenIndex: number, type: 'OFFLINE' | 'HIGH_CPU' | 'ERROR') {
     logger.warn(`[HEALTH] ⚠️  Display ${hardwareId} alert: ${type}`);
 
-    if (this.io && state) {
-      // Broadcast to all teacher sockets in this room
-      this.io.to(state.roomName).emit('display:alert', {
+    if (this.io) {
+      this.io.to(roomName).emit('display:alert', {
         hardwareId,
-        screenIndex: state.screenIndex,
+        screenIndex: Number(screenIndex),
         type,
-        message: `Screen ${state.screenIndex + 1} is ${type}`,
+        message: `Screen ${Number(screenIndex) + 1} is ${type}`,
         timestamp: Date.now()
       });
     }
@@ -135,58 +121,45 @@ class HealthMonitorService {
 
   // ─── STATUS BROADCAST ──────────────────────────────────────────────────────
 
-  broadcastStatus() {
+  async broadcastStatus() {
     if (!this.io) return;
+    const allHealth = await stateService.getAllHealth();
 
-    // Group by roomName and emit to each room
-    const byRoom = new Map<string, DisplayHealth[]>();
-    this.displayStates.forEach(state => {
-      const list = byRoom.get(state.roomName) ?? [];
-      list.push(state);
-      byRoom.set(state.roomName, list);
+    const byRoom = new Map<string, any[]>();
+    Object.entries(allHealth).forEach(([hardwareId, s]) => {
+      const list = byRoom.get(s.roomName) ?? [];
+      list.push({
+        hardwareId,
+        screenIndex: Number(s.screenIndex),
+        status: s.status,
+        metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
+        lastHeartbeat: Number(s.lastSeen),
+        secondsSinceHeartbeat: Math.floor((Date.now() - Number(s.lastSeen)) / 1000)
+      });
+      byRoom.set(s.roomName, list);
     });
 
     byRoom.forEach((screens, roomName) => {
-      const payload = screens
-        .sort((a, b) => a.screenIndex - b.screenIndex)
-        .map(s => ({
-          hardwareId: s.hardwareId,
-          screenIndex: s.screenIndex,
-          status: s.status,
-          metrics: s.metrics,
-          lastHeartbeat: s.lastHeartbeat,
-          secondsSinceHeartbeat: Math.floor((Date.now() - s.lastHeartbeat) / 1000)
-        }));
-
+      const payload = screens.sort((a, b) => a.screenIndex - b.screenIndex);
       this.io!.to(roomName).emit('display:status_update', { screens: payload });
     });
   }
 
   // ─── QUERY ─────────────────────────────────────────────────────────────────
 
-  getStatusForRoom(roomName: string): DisplayHealth[] {
-    const result: DisplayHealth[] = [];
-    this.displayStates.forEach(s => {
-      if (s.roomName === roomName) result.push(s);
-    });
-    return result.sort((a, b) => a.screenIndex - b.screenIndex);
-  }
+  async markOffline(hardwareId: string) {
+    const allHealth = await stateService.getAllHealth();
+    const state = allHealth[hardwareId];
 
-  markOffline(hardwareId: string) {
-    const state = this.displayStates.get(hardwareId);
     if (state && state.status !== 'offline') {
-      state.status = 'offline';
-      this.triggerAlert(hardwareId, 'OFFLINE');
+      await stateService.updateHealth(hardwareId, { status: 'offline' });
+      await this.triggerAlert(hardwareId, state.roomName, Number(state.screenIndex), 'OFFLINE');
       
-      // MISSION 06: TRIGGER AUTOMATIC REBALANCE
-      try {
-        const { displayAssignmentService } = require('./display-assignment.service');
-        displayAssignmentService.unregisterScreen(state.roomName, state.screenIndex);
-      } catch (err) {
-        logger.error(`[HEALTH] Rebalance failed for ${hardwareId}: ${err}`);
+      if (this.assignmentService) {
+        await this.assignmentService.unregisterScreen(state.roomName, Number(state.screenIndex));
       }
 
-      this.broadcastStatus();
+      await this.broadcastStatus();
     }
   }
 }

@@ -19,14 +19,11 @@ import { dbCheckMiddleware } from './middleware/auth';
 
 import http from 'http';
 import { socketService } from './services/socket.service';
+import { connectRedis } from './infra/redis';
 
 const app = express();
 const port = process.env.PORT || 5000;
 const server = http.createServer(app);
-
-// Initialize Socket.io
-socketService.init(server);
-
 
 // Security & Global Middleware
 // ... (rest of the middleware)
@@ -65,8 +62,13 @@ app.use(errorHandler);
 const startServer = async () => {
   try {
     await connectDB();
+    await connectRedis(); // MISSION 07: Distributed State
+    
+    // Initialize Socket.io AFTER infra is ready
+    socketService.init(server);
+    
     server.listen(port, () => {
-      logger.info(`[SERVER] Backend running on port ${port} (Socket.io Active)`);
+      logger.info(`[SERVER] Backend running on port ${port} (Socket.io & Redis Active)`);
     });
   } catch (err) {
     logger.error(err as any, 'Failed to start server:');

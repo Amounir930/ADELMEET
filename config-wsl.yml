@@ -1,0 +1,11 @@
+tunnel: f24c211b-1945-4ec3-b85d-fde7cbf01565
+credentials-file: /mnt/c/Users/Dell/.cloudflared/f24c211b-1945-4ec3-b85d-fde7cbf01565.json
+
+ingress:
+  - hostname: api.60sec.shop
+    service: http://localhost:5000
+  - hostname: meet.60sec.shop
+    service: http://localhost:5173
+  - hostname: wall.60sec.shop
+    service: http://localhost:5174
+  - service: http_status:404

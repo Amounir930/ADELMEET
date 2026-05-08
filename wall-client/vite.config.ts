@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5174,
-    allowedHosts: ['wall.60sec.shop', '60sec.shop']
+    strictPort: true,
+    host: true,
+    allowedHosts: true
   },
 })

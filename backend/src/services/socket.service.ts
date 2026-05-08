@@ -56,19 +56,11 @@ class SocketService {
         this.io?.to(roomName).emit('force_mute', { targetIdentity: 'all' });
       });
 
-      socket.on('teacher:unmute_all', async ({ roomName }: { roomName: string }) => {
-        logger.info(`[TEACHER-COMMAND] Global Unmute Requested for Room: ${roomName}`);
-        await stateService.setRoomState(roomName, { isMuted: false });
-        this.io?.to(roomName).emit('force_unmute', { targetIdentity: 'all' });
-      });
 
       socket.on('teacher:force_mute', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
         this.io?.to(roomName).emit('force_mute', { targetIdentity });
       });
 
-      socket.on('teacher:force_unmute', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
-        this.io?.to(roomName).emit('force_unmute', { targetIdentity });
-      });
 
       // MISSION 14: GLOBAL CAMERA CONTROL
       socket.on('teacher:lock_cameras', async ({ roomName }: { roomName: string }) => {
@@ -77,11 +69,6 @@ class SocketService {
         this.io?.to(roomName).emit('force_camera_off', { targetIdentity: 'all' });
       });
 
-      socket.on('teacher:unlock_cameras', async ({ roomName }: { roomName: string }) => {
-        logger.info(`[TEACHER-COMMAND] Global Camera Unlock Requested: ${roomName}`);
-        await stateService.setRoomState(roomName, { isCameraLocked: false });
-        this.io?.to(roomName).emit('force_camera_on', { targetIdentity: 'all' });
-      });
 
       // MISSION 12: RECORDING CONTROL
       socket.on('teacher:toggle_recording_permission', async ({ roomName, allowed }: { roomName: string, allowed: boolean }) => {

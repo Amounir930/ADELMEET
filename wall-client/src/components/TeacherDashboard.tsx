@@ -303,25 +303,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     } catch (err) { console.error('Mute failed', err); }
   };
 
-  // MISSION 12: DYNAMIC MODERATION ENGINE
-  // Instead of a simple state, we derive "isClassMuted" from the actual state of participants
-  const anyStudentUnmuted = classParticipants.some(p => p.isMicrophoneEnabled);
-
   const handleToggleClassMute = () => {
-    if (anyStudentUnmuted) {
-      socket?.emit('teacher:mute_all', { roomName: room.name });
-    } else {
-      socket?.emit('teacher:unmute_all', { roomName: room.name });
-    }
+    // SECURITY: MUTE ONLY
+    socket?.emit('teacher:mute_all', { roomName: room.name });
   };
 
-  const anyStudentCameraOn = classParticipants.some(p => p.isCameraEnabled);
   const handleToggleClassCamera = () => {
-    if (anyStudentCameraOn) {
-      socket?.emit('teacher:lock_cameras', { roomName: room.name });
-    } else {
-      socket?.emit('teacher:unlock_cameras', { roomName: room.name });
-    }
+    // SECURITY: LOCK ONLY
+    socket?.emit('teacher:lock_cameras', { roomName: room.name });
   };
 
   const handleToggleRecordingPermission = () => {
@@ -777,14 +766,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
             }}
             style={{ 
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-              background: anyStudentUnmuted ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.1)',
-              color: anyStudentUnmuted ? '#ef4444' : '#6366f1',
-              border: `1px solid ${anyStudentUnmuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(99, 102, 241, 0.2)'}`,
+              background: 'rgba(239, 68, 68, 0.1)',
+              color: '#ef4444',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
               borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
             }}
           >
-            {anyStudentUnmuted ? <MicOff size={20} /> : <Mic size={20} />}
-            <span style={{ fontSize: '10px', fontWeight: '900' }}>{anyStudentUnmuted ? 'MUTE ALL' : 'UNMUTE ALL'}</span>
+            <MicOff size={20} />
+            <span style={{ fontSize: '10px', fontWeight: '900' }}>MUTE ALL</span>
           </button>
 
           <button 
@@ -794,14 +783,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
             }}
             style={{ 
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-              background: anyStudentCameraOn ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-              color: anyStudentCameraOn ? '#ef4444' : '#10b981',
-              border: `1px solid ${anyStudentCameraOn ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
+              background: 'rgba(239, 68, 68, 0.1)',
+              color: '#ef4444',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
               borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
             }}
           >
-            {anyStudentCameraOn ? <VideoOff size={20} /> : <Video size={20} />}
-            <span style={{ fontSize: '10px', fontWeight: '900' }}>{anyStudentCameraOn ? 'LOCK CAM' : 'UNLOCK CAM'}</span>
+            <VideoOff size={20} />
+            <span style={{ fontSize: '10px', fontWeight: '900' }}>LOCK ALL</span>
           </button>
 
           <button 
@@ -841,9 +830,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
               const isOnline = !!p;
               
               const micPub = p?.getTrackPublication(Track.Source.Microphone);
-              const camPub = p?.getTrackPublication(Track.Source.Camera);
-              const isMuted = !p?.isMicrophoneEnabled || micPub?.isMuted;
-              const isCamOff = !p?.isCameraEnabled || camPub?.isMuted;
 
               return (
                 <div key={pData.identity} style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)', opacity: isOnline ? 1 : 0.6 }}>
@@ -858,12 +844,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
                       )}
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      {isOnline ? (
-                        <>
-                          {isMuted ? <MicOff size={14} color="#ef4444" /> : <Mic size={14} color="#10b981" />}
-                          {isCamOff ? <VideoOff size={14} color="#ef4444" /> : <Video size={14} color="#10b981" />}
-                        </>
-                      ) : (
+                      {!isOnline && (
                         <span style={{ fontSize: '10px', color: '#ef4444', fontWeight: 'bold' }}>OFFLINE</span>
                       )}
                     </div>

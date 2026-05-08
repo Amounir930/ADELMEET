@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ['meet.60sec.shop', '60sec.shop']
+    port: 5173,
+    strictPort: true,
+    host: true,
+    allowedHosts: true
   }
 })

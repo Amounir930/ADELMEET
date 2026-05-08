@@ -1,7 +1,7 @@
 import React from 'react';
 import { RemoteParticipant, Room } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
-import { UserMinus } from 'lucide-react';
+
 
 interface ParticipantGridProps {
   participants: RemoteParticipant[];
@@ -15,7 +15,7 @@ interface ParticipantGridProps {
  * Optimized to prevent distortion on wide displays.
  * Enforces cinematic aspect ratios.
  */
-export const ParticipantGrid: React.FC<ParticipantGridProps> = ({ participants, room, onKick }) => {
+export const ParticipantGrid: React.FC<ParticipantGridProps> = ({ participants, room }) => {
   
   const getGridLayout = () => {
     const n = participants.length;
@@ -73,25 +73,6 @@ export const ParticipantGrid: React.FC<ParticipantGridProps> = ({ participants, 
             <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '6px 14px', borderRadius: '10px', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)' }}>
               <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>{p.name || p.identity.split('_')[0]}</span>
             </div>
-            <button
-              onClick={() => onKick?.(p.identity)}
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '12px',
-                background: 'rgba(239, 68, 68, 0.1)',
-                color: '#ef4444',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.3s ease'
-              }}
-              title="Kick & Ban"
-            >
-              <UserMinus size={16} />
-            </button>
           </div>
         </div>
       ))}

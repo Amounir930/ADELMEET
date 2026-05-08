@@ -10,6 +10,7 @@ const lectureSchema = new mongoose.Schema({
   status: { type: String, enum: ['active', 'completed', 'scheduled'], default: 'scheduled' },
   visibility: { type: String, enum: ['public', 'private'], default: 'public' },
   bannedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  participantsMetadata: { type: Array, default: [] },
 }, { timestamps: true });
 
 // Pre-save hook to update teacher stats

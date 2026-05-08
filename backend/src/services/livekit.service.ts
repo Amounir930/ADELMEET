@@ -87,6 +87,20 @@ export class LiveKitService {
       throw error;
     }
   }
+
+  async updateParticipant(roomName: string, identity: string, options: { metadata?: string }) {
+    this.ensureConfigured();
+    if (!this.host) return;
+    try {
+      const roomService = new RoomServiceClient(this.host, this.apiKey, this.apiSecret);
+      await roomService.updateParticipant(roomName, identity, options);
+      console.log(`[LIVEKIT] Participant ${identity} updated.`);
+    } catch (error) {
+      console.error(`[LIVEKIT] Failed to update participant:`, error);
+      throw error;
+    }
+  }
 }
 
+// MISSION 07: SOVEREIGN SINGLETON
 export const liveKitService = new LiveKitService();

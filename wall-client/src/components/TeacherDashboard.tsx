@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Room, RoomEvent, RemoteParticipant, ParticipantEvent } from 'livekit-client';
+import { Room, RoomEvent, RemoteParticipant, ParticipantEvent, Track } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
 import { ParticipantGrid } from './ParticipantGrid';
-import { Users, Mic, MicOff, Video, VideoOff, PhoneOff, Maximize, Minimize, RefreshCw, XSquare, PlusSquare, Circle, StopCircle, ShieldCheck, ShieldAlert, Pause, Play } from 'lucide-react';
+import { Users, Mic, MicOff, Video, VideoOff, PhoneOff, Maximize, Minimize, RefreshCw, XSquare, PlusSquare, Circle, StopCircle, ShieldCheck, ShieldAlert, Pause, Play, Search, ChevronLeft, ChevronRight, Hand } from 'lucide-react';
 import { useLocalRecorder } from '../hooks/useLocalRecorder';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +32,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
   const { socket } = useSocket();
   const [isAddingScreen, setIsAddingScreen] = useState(false);
   const [classParticipants, setClassParticipants] = useState<RemoteParticipant[]>([]);
+  const [allTimeParticipants, setAllTimeParticipants] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 32; // SOVEREIGN LIMIT: Balanced for browser stability
   const [isMicEnabled, setIsMicEnabled] = useState(true);
@@ -39,6 +40,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
   const [isEnding, setIsEnding] = useState(false);
   const [isRecordingAllowed, setIsRecordingAllowed] = useState(false);
   const { isRecording, isPaused, duration, startRecording, stopRecording, pauseRecording, resumeRecording } = useLocalRecorder(room);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredParticipants = classParticipants.filter(p => 
+    p.identity.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -48,6 +55,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
 
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
   const controlsTimeoutRef = useRef<any | null>(null);
   const [localVideoTrack, setLocalVideoTrack] = useState<any>(null);
 
@@ -104,13 +113,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
 
   const updateParticipants = useCallback(() => {
     if (!room) return;
-    // SOVEREIGN ISOLATION: Only include remote participants (Students)
     const participants = Array.from(room.remoteParticipants.values()).filter(p => {
       const isTeacher = p.identity.includes('teacher') || (p.metadata && JSON.parse(p.metadata).role === 'teacher');
       return !isTeacher;
     });
     console.log('[TEACHER-CORE] Audited Student Participants:', participants.length);
     setClassParticipants(participants);
+
+    // MISSION 13: PERSISTENT ATTENDANCE TRACKING
+    setAllTimeParticipants(prev => {
+      const next = [...prev];
+      participants.forEach(p => {
+        if (!next.find(item => item.identity === p.identity)) {
+          next.push({ identity: p.identity, name: p.name });
+        }
+      });
+      return next;
+    });
   }, [room]);
 
   // MISSION 13: RESPONSIVE COMMAND CENTER STYLES
@@ -189,6 +208,16 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     room.on(RoomEvent.TrackMuted, handleUpdate);
     room.on(RoomEvent.TrackUnmuted, handleUpdate);
 
+    socket.on('participant:raise_hand', ({ identity, raised }: { identity: string, raised: boolean }) => {
+      console.log(`[TEACHER-CORE] Hand Event: ${identity} -> ${raised}`);
+      setRaisedHands(prev => {
+        const next = new Set(prev);
+        if (raised) next.add(identity);
+        else next.delete(identity);
+        return next;
+      });
+    });
+
     socket.on('sync_room_state', (state: any) => {
       console.log('[TEACHER-CORE] Syncing Room State:', state);
       if (state.isRecordingAllowed !== undefined) {
@@ -258,18 +287,40 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     }
   };
 
+  const handleGrantAudio = async (participantId: string) => {
+    try {
+      await axios.post(`${API_BASE}/lectures/${lecture._id}/grant-audio`, { participantId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) { console.error('Grant audio failed', err); }
+  };
+
+  const handleMuteStudent = async (participantId: string, trackSid: string) => {
+    try {
+      await axios.post(`${API_BASE}/lectures/${lecture._id}/mute`, { participantId, trackSid }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch (err) { console.error('Mute failed', err); }
+  };
+
   // MISSION 12: DYNAMIC MODERATION ENGINE
   // Instead of a simple state, we derive "isClassMuted" from the actual state of participants
   const anyStudentUnmuted = classParticipants.some(p => p.isMicrophoneEnabled);
-  const classStatusLabel = anyStudentUnmuted ? 'MUTE ALL' : 'UNMUTE ALL';
 
   const handleToggleClassMute = () => {
     if (anyStudentUnmuted) {
-      // If someone is unmuted, we want to MUTE EVERYONE
       socket?.emit('teacher:mute_all', { roomName: room.name });
     } else {
-      // If everyone is already muted, we UNMUTE EVERYONE
       socket?.emit('teacher:unmute_all', { roomName: room.name });
+    }
+  };
+
+  const anyStudentCameraOn = classParticipants.some(p => p.isCameraEnabled);
+  const handleToggleClassCamera = () => {
+    if (anyStudentCameraOn) {
+      socket?.emit('teacher:lock_cameras', { roomName: room.name });
+    } else {
+      socket?.emit('teacher:unlock_cameras', { roomName: room.name });
     }
   };
 
@@ -302,10 +353,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-      {/* SOVEREIGN OVERLAYS (AUTO-HIDING) */}
-      <div style={{ 
+    <div style={{ 
+      height: '100vh', 
+      width: '100vw', 
+      display: 'grid', 
+      gridTemplateColumns: isSidebarOpen ? '1fr 380px' : '1fr 60px',
+      background: '#020617', 
+      overflow: 'hidden', 
+      fontFamily: "'Outfit', sans-serif",
+      transition: 'grid-template-columns 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+    }}>
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        
+        {/* SOVEREIGN OVERLAYS (AUTO-HIDING) */}
+        <div style={{ 
         position: 'absolute', 
         top: '20px', 
         left: '40px', 
@@ -340,7 +401,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
       }}>
         <div style={{ width: '100%', height: '100%', display: 'flex' }}>
           <ParticipantGrid 
-            participants={classParticipants.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)} 
+            participants={filteredParticipants.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)} 
             room={room} 
             onKick={handleKick} 
           />
@@ -522,36 +583,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
             </div>
           </div>
 
-          {/* GROUP 2: GLOBAL CLASS MODERATION */}
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '5px 15px', background: 'rgba(99, 102, 241, 0.05)', borderRadius: '25px', border: '1px solid rgba(99, 102, 241, 0.1)' }}>
-            <button 
-              onClick={handleToggleClassMute}
-              style={{
-                ...commandButtonStyle,
-                background: !anyStudentUnmuted ? '#6366f1' : 'rgba(239, 68, 68, 0.2)',
-                border: `1px solid ${!anyStudentUnmuted ? '#6366f1' : 'rgba(239, 68, 68, 0.3)'}`,
-                padding: '10px 20px'
-              }}
-            >
-              {anyStudentUnmuted ? <MicOff size={18} /> : <Mic size={18} />}
-              <span style={{ fontSize: '11px', fontWeight: '800' }}>{classStatusLabel}</span>
-            </button>
-
-            <button 
-              onClick={handleToggleRecordingPermission}
-              style={{
-                ...commandButtonStyle,
-                background: isRecordingAllowed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                color: isRecordingAllowed ? '#22c55e' : '#94a3b8',
-                border: isRecordingAllowed ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.1)',
-                minWidth: 'auto', padding: '12px'
-              }}
-              title={isRecordingAllowed ? 'Revoke Student Recording' : 'Allow Student Recording'}
-            >
-              {isRecordingAllowed ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
-              <span style={{ fontSize: '10px', fontWeight: 'bold' }}>{isRecordingAllowed ? 'STU-REC: ON' : 'STU-REC: OFF'}</span>
-            </button>
-          </div>
+          {/* SOVEREIGN COMMAND CENTER: REMOVED FROM BOTTOM */}
 
           {/* GROUP 3: SCREEN ORCHESTRATION */}
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '5px 15px', background: 'rgba(16, 185, 129, 0.05)', borderRadius: '25px', border: '1px solid rgba(16, 185, 129, 0.1)' }}>
@@ -672,6 +704,198 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
           </button>
         </div>
       </div>
+    </div>
+
+    {/* --- SOVEREIGN SIDEBAR SYSTEM (RIGHT) --- */}
+      <div style={{ 
+        background: 'rgba(15, 23, 42, 0.98)', 
+        borderLeft: '1px solid rgba(255,255,255,0.1)', 
+        display: 'flex',
+        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        overflow: 'hidden'
+      }}>
+        {/* VERTICAL TOOLBAR (ALWAYS VISIBLE) */}
+        <div style={{ 
+          width: '60px', 
+          background: 'rgba(15, 23, 42, 0.5)', 
+          borderRight: isSidebarOpen ? '1px solid rgba(255,255,255,0.05)' : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '20px 0',
+          gap: '20px'
+        }}>
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            style={{ width: '40px', height: '40px', borderRadius: '12px', background: isSidebarOpen ? 'rgba(99, 102, 241, 0.1)' : 'rgba(99, 102, 241, 0.2)', color: '#6366f1', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isSidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+          </button>
+          
+          {/* PLACEHOLDERS FOR FUTURE BUTTONS */}
+          <button style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }} title="Chat (Coming Soon)">
+            <PlusSquare size={18} /> 
+          </button>
+          <button style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', color: '#94a3b8', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.5 }} title="Multi-Screens (Coming Soon)">
+            <Maximize size={18} />
+          </button>
+        </div>
+
+        {/* MANAGEMENT CONTENT (TOGGLEABLE) */}
+        <div style={{ 
+          flex: 1,
+          padding: '25px', 
+          display: 'flex', 
+          flexDirection: 'column',
+          opacity: isSidebarOpen ? 1 : 0,
+          visibility: isSidebarOpen ? 'visible' : 'hidden',
+          transition: 'all 0.3s ease',
+          minWidth: '320px'
+        }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={{ color: '#fff', fontSize: '20px', fontWeight: '900', letterSpacing: '1px', margin: 0 }}>PARTICIPANTS</h2>
+          <span style={{ background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
+            {classParticipants.length} ONLINE
+          </span>
+        </div>
+
+        {/* MISSION 14: GLOBAL COMMAND HUB (ENGINEERED FOR REAL ACTION) */}
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(3, 1fr)', 
+          gap: '10px', 
+          marginBottom: '20px',
+          padding: '15px',
+          background: 'rgba(15, 23, 42, 0.4)',
+          borderRadius: '20px',
+          border: '1px solid rgba(255,255,255,0.05)'
+        }}>
+          <button 
+            onClick={() => {
+              console.log('[COMMAND-HUB] Mute All Requested');
+              handleToggleClassMute();
+            }}
+            style={{ 
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
+              background: anyStudentUnmuted ? 'rgba(239, 68, 68, 0.1)' : 'rgba(99, 102, 241, 0.1)',
+              color: anyStudentUnmuted ? '#ef4444' : '#6366f1',
+              border: `1px solid ${anyStudentUnmuted ? 'rgba(239, 68, 68, 0.2)' : 'rgba(99, 102, 241, 0.2)'}`,
+              borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
+            }}
+          >
+            {anyStudentUnmuted ? <MicOff size={20} /> : <Mic size={20} />}
+            <span style={{ fontSize: '10px', fontWeight: '900' }}>{anyStudentUnmuted ? 'MUTE ALL' : 'UNMUTE ALL'}</span>
+          </button>
+
+          <button 
+            onClick={() => {
+              console.log('[COMMAND-HUB] Camera Lock Requested');
+              handleToggleClassCamera();
+            }}
+            style={{ 
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
+              background: anyStudentCameraOn ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+              color: anyStudentCameraOn ? '#ef4444' : '#10b981',
+              border: `1px solid ${anyStudentCameraOn ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
+              borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
+            }}
+          >
+            {anyStudentCameraOn ? <VideoOff size={20} /> : <Video size={20} />}
+            <span style={{ fontSize: '10px', fontWeight: '900' }}>{anyStudentCameraOn ? 'LOCK CAM' : 'UNLOCK CAM'}</span>
+          </button>
+
+          <button 
+            onClick={() => {
+              console.log('[COMMAND-HUB] Recording Toggle Requested');
+              handleToggleRecordingPermission();
+            }}
+            style={{ 
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
+              background: isRecordingAllowed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+              color: isRecordingAllowed ? '#22c55e' : '#94a3b8',
+              border: `1px solid ${isRecordingAllowed ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.1)'}`,
+              borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
+            }}
+          >
+            {isRecordingAllowed ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />}
+            <span style={{ fontSize: '10px', fontWeight: '900' }}>{isRecordingAllowed ? 'STU-REC: ON' : 'STU-REC: OFF'}</span>
+          </button>
+        </div>
+        
+        <div style={{ position: 'relative', marginBottom: '20px' }}>
+          <Search style={{ position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)', color: '#6366f1' }} size={16} />
+          <input 
+            type="text" 
+            placeholder="Search students..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '12px 12px 12px 40px', color: '#fff', outline: 'none', fontSize: '13px' }} 
+          />
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {allTimeParticipants
+            .filter(p => p.identity.toLowerCase().includes(searchQuery.toLowerCase()) || (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase())))
+            .map(pData => {
+              const p = room.remoteParticipants.get(pData.identity);
+              const isOnline = !!p;
+              
+              const micPub = p?.getTrackPublication(Track.Source.Microphone);
+              const camPub = p?.getTrackPublication(Track.Source.Camera);
+              const isMuted = !p?.isMicrophoneEnabled || micPub?.isMuted;
+              const isCamOff = !p?.isCameraEnabled || camPub?.isMuted;
+
+              return (
+                <div key={pData.identity} style={{ background: 'rgba(255,255,255,0.03)', padding: '15px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)', opacity: isOnline ? 1 : 0.6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <div style={{ width: '8px', height: '8px', background: isOnline ? '#10b981' : '#ef4444', borderRadius: '50%', boxShadow: isOnline ? '0 0 10px #10b981' : 'none' }}></div>
+                      <span style={{ color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>{pData.name || pData.identity.split('_student')[0]}</span>
+                      {raisedHands.has(pData.identity) && (
+                        <div style={{ animation: 'pulse 1.5s infinite' }}>
+                          <Hand size={14} color="#6366f1" fill="#6366f1" />
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {isOnline ? (
+                        <>
+                          {isMuted ? <MicOff size={14} color="#ef4444" /> : <Mic size={14} color="#10b981" />}
+                          {isCamOff ? <VideoOff size={14} color="#ef4444" /> : <Video size={14} color="#10b981" />}
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#ef4444', fontWeight: 'bold' }}>OFFLINE</span>
+                      )}
+                    </div>
+                  </div>
+                  {isOnline && (
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button 
+                        onClick={() => micPub && handleMuteStudent(pData.identity, micPub.trackSid)}
+                        style={{ flex: 1, padding: '8px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+                      >
+                        <MicOff size={14} />
+                      </button>
+                      <button 
+                        onClick={() => handleGrantAudio(pData.identity)}
+                        style={{ flex: 1, padding: '8px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+                      >
+                        <PlusSquare size={14} />
+                      </button>
+                      <button 
+                        onClick={() => handleKick(pData.identity)}
+                        style={{ flex: 1, padding: '8px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: 'none', cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
+                      >
+                        <XSquare size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      </div>
+    </div>
     </div>
   );
 };

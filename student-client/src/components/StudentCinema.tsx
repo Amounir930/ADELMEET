@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Room, RemoteParticipant, VideoQuality, RoomEvent, Track } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
-import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand } from 'lucide-react';
 import { useLocalRecorder } from '../hooks/useLocalRecorder';
 import { useLiveKit } from '../contexts/LiveKitContext';
 import { useStudentModeration } from '../hooks/useStudentModeration';
@@ -17,6 +17,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   const [teacher, setTeacher] = useState<RemoteParticipant | null>(null);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [isHandRaised, setIsHandRaised] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [currentQuality, setCurrentQuality] = useState<VideoQuality>(VideoQuality.HIGH);
@@ -185,26 +186,32 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
     
     const autoEnable = async () => {
       try {
-        console.log('[STUDENT-CINEMA] Auto-Enabling Media (Mic Disabled by default for Echo Prevention)...');
+        console.log('[STUDENT-CINEMA] Sovereign Entry: Enforcing initial state...');
+        // Only run once on mount/room join
         await room.localParticipant.setMicrophoneEnabled(false);
         await room.localParticipant.setCameraEnabled(true);
         setIsMicEnabled(false);
         setIsCameraEnabled(true);
-      } catch (e) {
-        console.error('Failed to auto-enable media', e);
-      }
+      } catch (e) { console.error('Failed to auto-enable media', e); }
     };
     
     autoEnable();
 
-    const sync = () => {
-      setIsMicEnabled(room.localParticipant.isMicrophoneEnabled);
-      setIsCameraEnabled(room.localParticipant.isCameraEnabled);
+    const syncWithMetadata = () => {
+      if (!room.localParticipant.metadata) return;
+      try {
+        const meta = JSON.parse(room.localParticipant.metadata);
+        if (meta.isMutedByTeacher && isMicEnabled) {
+          room.localParticipant.setMicrophoneEnabled(false);
+          setIsMicEnabled(false);
+          showToast('Teacher has muted your microphone.', 'error');
+        }
+      } catch (e) { console.error('Metadata parse error', e); }
     };
-    room.localParticipant.on('metadataChanged' as any, sync);
-    sync();
-    return () => { room.localParticipant.off('metadataChanged' as any, sync); };
-  }, [room]);
+
+    room.localParticipant.on('metadataChanged' as any, syncWithMetadata);
+    return () => { room.localParticipant.off('metadataChanged' as any, syncWithMetadata); };
+  }, [room]); // REMOVED isMicEnabled from dependencies to prevent auto-mute loop
 
   const toggleMic = async () => {
     const newState = !isMicEnabled;
@@ -289,10 +296,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
           position: 'absolute', bottom: isFullscreen ? '60px' : '40px', left: '50%', transform: `translateX(-50%) translateY(${showControls ? '0' : '40px'})`, 
           opacity: showControls ? 1 : 0, transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 1000 
         }}>
-          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(45px)', padding: '12px 30px', borderRadius: '35px', display: 'flex', alignItems: 'center', gap: '30px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 30px 60px rgba(0,0,0,1)' }}>
-             <div style={{ width: '120px', height: '70px', borderRadius: '18px', overflow: 'hidden', border: '2px solid #6366f1', background: '#000' }}>
-                <VideoTrack participant={room.localParticipant} mode="pip" />
-             </div>
+          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(45px)', padding: '12px 30px', borderRadius: '35px', display: 'flex', alignItems: 'center', gap: '20px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 30px 60px rgba(0,0,0,1)' }}>
              <div style={{ display: 'flex', gap: '15px' }}>
                 <button onClick={toggleMic} style={{ width: '52px', height: '52px', borderRadius: '18px', background: isMicEnabled ? '#10b981' : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {isMicEnabled ? <Mic size={24} /> : <MicOff size={24} />}
@@ -355,6 +359,30 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                 <button onClick={toggleQuality} style={{ width: '52px', height: '52px', borderRadius: '18px', background: currentQuality === VideoQuality.HIGH ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.1)', color: currentQuality === VideoQuality.HIGH ? '#10b981' : '#fff', border: currentQuality === VideoQuality.HIGH ? '1px solid #10b981' : 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                     <Gauge size={20} />
                     <span style={{ fontSize: '9px', fontWeight: 'bold' }}>{currentQuality === 0 ? '360' : (currentQuality === 1 ? '720' : 'MAX')}</span>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    const nextState = !isHandRaised;
+                    setIsHandRaised(nextState);
+                    socket?.emit('participant:raise_hand', { 
+                      roomName: room.name, 
+                      identity: room.localParticipant.identity,
+                      raised: nextState 
+                    });
+                    showToast(nextState ? 'You raised your hand!' : 'Hand lowered.', nextState ? 'success' : 'error');
+                  }}
+                  style={{ 
+                    width: '52px', height: '52px', borderRadius: '18px', 
+                    background: isHandRaised ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.1)', 
+                    color: isHandRaised ? '#6366f1' : '#fff', 
+                    border: isHandRaised ? '2px solid #6366f1' : 'none', 
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                  }}
+                  title={isHandRaised ? 'Lower Hand' : 'Raise Hand'}
+                >
+                  <Hand size={24} className={isHandRaised ? 'animate-bounce' : ''} />
                 </button>
              </div>
              <button onClick={onDisconnect} style={{ width: '52px', height: '52px', borderRadius: '18px', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

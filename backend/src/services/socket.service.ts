@@ -70,6 +70,19 @@ class SocketService {
         this.io?.to(roomName).emit('force_unmute', { targetIdentity });
       });
 
+      // MISSION 14: GLOBAL CAMERA CONTROL
+      socket.on('teacher:lock_cameras', async ({ roomName }: { roomName: string }) => {
+        logger.info(`[TEACHER-COMMAND] Global Camera Lock Requested: ${roomName}`);
+        await stateService.setRoomState(roomName, { isCameraLocked: true });
+        this.io?.to(roomName).emit('force_camera_off', { targetIdentity: 'all' });
+      });
+
+      socket.on('teacher:unlock_cameras', async ({ roomName }: { roomName: string }) => {
+        logger.info(`[TEACHER-COMMAND] Global Camera Unlock Requested: ${roomName}`);
+        await stateService.setRoomState(roomName, { isCameraLocked: false });
+        this.io?.to(roomName).emit('force_camera_on', { targetIdentity: 'all' });
+      });
+
       // MISSION 12: RECORDING CONTROL
       socket.on('teacher:toggle_recording_permission', async ({ roomName, allowed }: { roomName: string, allowed: boolean }) => {
         logger.info(`[TEACHER-COMMAND] Recording permission set to ${allowed} for room: ${roomName}`);
@@ -138,6 +151,11 @@ class SocketService {
       socket.on('force_unmute', () => logger.warn('[SECURITY] Blocked legacy force_unmute'));
 
       // RESTORED: STUDENT TELEMETRY
+      socket.on('participant:raise_hand', ({ roomName, identity, raised }: { roomName: string, identity: string, raised: boolean }) => {
+        logger.info(`[STUDENT-INTERACTION] Hand Event: ${identity} in ${roomName} -> ${raised}`);
+        this.io?.to(roomName).emit('participant:raise_hand', { identity, raised });
+      });
+
       socket.on('participant_mic_on', ({ roomName }: { roomName: string }) => {
         logger.info(`[STUDENT-SERVICE] Telemetry: Student turned Mic ON in ${roomName}`);
       });

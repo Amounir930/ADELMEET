@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Track, Participant, Room } from 'livekit-client';
 import { User } from 'lucide-react';
+import io from 'socket.io-client';
 
 interface VideoTrackProps {
   participant: Participant;
@@ -21,6 +22,9 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({ participant, room, mode 
   const [videoTrack, setVideoTrack] = useState<any>(track || null);
   const [audioTrack, setAudioTrack] = useState<any>(null);
   const [isMicEnabled, setIsMicEnabled] = useState(participant.isMicrophoneEnabled);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isKicked, setIsKicked] = useState(false);
+  const [hasAudioPriority, setHasAudioPriority] = useState(false);
 
   // Update if manual track changes
   useEffect(() => {
@@ -123,7 +127,7 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({ participant, room, mode 
       console.log(`[AUDIO-ENGINE] Unmuting ${participant.identity}...`);
       actualTrack.attach(el);
       el.muted = false;
-      el.volume = 1.0;
+      el.volume = hasAudioPriority ? 1.0 : 0.5;
       el.play().catch(err => {
         if (err.name !== 'AbortError') console.warn('[AUDIO-ENGINE] Play blocked:', err);
       });
@@ -137,7 +141,85 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({ participant, room, mode 
     return () => {
       actualTrack.detach(el);
     };
-  }, [audioTrack, isMicEnabled, participant.identity, room?.localParticipant.identity]);
+  }, [audioTrack, isMicEnabled, participant.identity, room?.localParticipant.identity, hasAudioPriority]);
+
+  const handleMute = () => {
+    setIsMuted(!isMuted);
+    if (isMuted) {
+      // Send request to backend to unmute participant
+      fetch('/api/unmute-participant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          participantId: participant.identity,
+        }),
+      });
+    } else {
+      // Send request to backend to mute participant
+      fetch('/api/mute-participant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          participantId: participant.identity,
+        }),
+      });
+    }
+  };
+
+  const handleKick = () => {
+    setIsKicked(true);
+    // Send request to backend to kick participant
+    fetch('/api/kick-participant', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        participantId: participant.identity,
+      }),
+    });
+  };
+
+  const handleGrantAudio = () => {
+    setHasAudioPriority(!hasAudioPriority);
+    if (hasAudioPriority) {
+      // Send request to backend to revoke audio priority
+      fetch('/api/revoke-audio-priority', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          participantId: participant.identity,
+        }),
+      });
+    } else {
+      // Send request to backend to grant audio priority
+      fetch('/api/grant-audio-priority', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          participantId: participant.identity,
+        }),
+      });
+    }
+  };
+
+  const socket = io();
+
+  useEffect(() => {
+    socket.on('participant-updated', (data) => {
+      if (data.participantId === participant.identity) {
+        updateTracks();
+      }
+    });
+  }, [socket, participant.identity, updateTracks]);
 
   return (
     <div style={{
@@ -208,6 +290,46 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({ participant, room, mode 
           `}</style>
         </div>
       )}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        <button onClick={handleMute} style={{
+          backgroundColor: isMuted ? '#ccc' : '#4CAF50',
+          color: '#fff',
+          padding: '10px',
+          border: 'none',
+          borderRadius: '5px',
+          cursor: 'pointer',
+        }}>
+          {isMuted ? 'Unmute' : 'Mute'}
+        </button>
+        <button onClick={handleKick} style={{
+          backgroundColor: '#f44336',
+          color: '#fff',
+          padding: '10px',
+          border: 'none',
+          borderRadius: '5px',
+          cursor: 'pointer',
+          marginTop: '10px',
+        }}>
+          Kick
+        </button>
+        <button onClick={handleGrantAudio} style={{
+          backgroundColor: hasAudioPriority ? '#ccc' : '#4CAF50',
+          color: '#fff',
+          padding: '10px',
+          border: 'none',
+          borderRadius: '5px',
+          cursor: 'pointer',
+          marginTop: '10px',
+        }}>
+          {hasAudioPriority ? 'Revoke Audio Priority' : 'Grant Audio Priority'}
+        </button>
+      </div>
     </div>
   );
 };

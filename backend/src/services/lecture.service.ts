@@ -1,4 +1,3 @@
-
 import mongoose from 'mongoose';
 import { Lecture } from '../models/Lecture';
 import { User } from '../models/User';
@@ -9,7 +8,6 @@ import { socketService } from './socket.service';
 /**
  * MISSION 12: SOVEREIGN BACKEND ORCHESTRATOR
  * This service encapsulates all lecture business logic.
- * Scale Mandate: High-Concurrency, Error Isolation, Entity-Agnostic functions.
  */
 export class LectureService {
   
@@ -17,7 +15,6 @@ export class LectureService {
     const teacher = await User.findById(teacherId);
     if (!teacher) throw new AppError(404, 'Teacher not found', 'TEACHER_MISSING');
 
-    // SOVEREIGN UNIQUENESS: Prevent duplicate active titles
     const existing = await Lecture.findOne({ title: { $regex: new RegExp('^' + title.trim() + '$', 'i') }, status: 'active' });
     if (existing) throw new AppError(400, 'An active lecture with this name already exists', 'DUPLICATE_LECTURE');
 
@@ -30,24 +27,21 @@ export class LectureService {
       roomName,
       scheduledAt: scheduledAt || new Date(),
       status: 'active',
-      visibility: visibility || 'public'
+      visibility: visibility || 'public',
+      participantsMetadata: []
     });
 
     await lecture.save();
-    console.log(`[ORCHESTRA] Lecture Created: ${lecture.roomName}`);
     return lecture;
   }
 
   async getAvailableLectures(userId: string, userRole: string) {
     let query: any = { status: { $ne: 'completed' } };
-
-    // Point 5: Role-based logic handled in Orchestrator
     if (userRole === 'teacher') {
       query.teacher = userId;
     } else {
       query.visibility = 'public';
     }
-
     return await Lecture.find(query).sort({ scheduledAt: 1 }).lean();
   }
 
@@ -64,7 +58,6 @@ export class LectureService {
 
     if (!lecture) throw new AppError(404, 'Lecture not found', 'LECTURE_MISSING');
 
-    // SOVEREIGN SECURITY: Block banned users
     if (lecture.bannedUsers && (lecture.bannedUsers as any).includes(userId)) {
       throw new AppError(403, 'You have been banned from this session', 'USER_BANNED');
     }
@@ -72,14 +65,14 @@ export class LectureService {
     const user = await User.findById(userId);
     if (!user) throw new AppError(404, 'User not found', 'USER_MISSING');
 
-    // MISSION 12 - POINT 8: METADATA LAYER (Reverted to JSON for debugging)
     const rawMetadata = {
       role: userRole,
       initialMuted: userRole === 'student',
       userId: user._id,
       lectureId: lecture._id,
       timestamp: Date.now(),
-      screen
+      screen,
+      customAttributes: {} as any
     };
 
     let identity = userRole === 'teacher' ? `${user._id}_teacher` : `${user._id}_student`;
@@ -92,6 +85,9 @@ export class LectureService {
       isTeacher: userRole === 'teacher',
       metadata: JSON.stringify(rawMetadata)
     });
+
+    (lecture.participantsMetadata as any).push(rawMetadata);
+    await lecture.save();
 
     return {
       token,
@@ -114,7 +110,6 @@ export class LectureService {
     lecture.status = 'completed';
     await lecture.save();
 
-    // POINT 6: Targeted DB Sync (Room-specific)
     socketService.emitToRoom(lecture.roomName, 'db_sync', { 
       collection: 'lectures', 
       id: lecture._id,
@@ -132,10 +127,7 @@ export class LectureService {
     lecture.status = status as any;
     await lecture.save();
     
-    // Broadcast status change
     socketService.emitToRoom(lecture.roomName, 'session_ended', { lectureId }); 
-    
-    // MISSION 13: FORCE TEARDOWN - Kill the LiveKit room to force all clients to disconnect hardware
     liveKitService.deleteRoom(lecture.roomName).catch(e => console.error('Failed to teardown LK room', e));
 
     return lecture;
@@ -145,15 +137,38 @@ export class LectureService {
     const lecture = await Lecture.findOne({ _id: lectureId, teacher: teacherId });
     if (!lecture) throw new AppError(404, 'Lecture not found or unauthorized', 'LECTURE_MISSING');
 
-    // Add to banned list if not already there
     if (!lecture.bannedUsers.includes(studentId as any)) {
       lecture.bannedUsers.push(studentId as any);
       await lecture.save();
     }
 
-    // Return room name so controller can emit kick event
+    const identity = `${studentId}_student`;
+    await liveKitService.removeParticipant(lecture.roomName, identity).catch(e => console.error('LK Eject Failed', e));
+    
     socketService.emitToRoom(lecture.roomName, 'kick_participant', { studentId });
     return { roomName: lecture.roomName, studentId };
+  }
+
+  async muteParticipant(lectureId: string, participantId: string, teacherId: string, trackSid: string) {
+    const lecture = await Lecture.findOne({ _id: lectureId, teacher: teacherId });
+    if (!lecture) throw new AppError(404, 'Lecture not found or unauthorized', 'LECTURE_MISSING');
+
+    const identity = `${participantId}_student`;
+    await liveKitService.muteParticipant(lecture.roomName, identity, trackSid, true);
+    
+    socketService.emitToRoom(lecture.roomName, 'mute_participant', { participantId });
+    return { roomName: lecture.roomName, participantId };
+  }
+
+  async grantAudio(lectureId: string, participantId: string, teacherId: string) {
+    const lecture = await Lecture.findOne({ _id: lectureId, teacher: teacherId });
+    if (!lecture) throw new AppError(404, 'Lecture not found or unauthorized', 'LECTURE_MISSING');
+
+    const identity = `${participantId}_student`;
+    await liveKitService.updateParticipant(lecture.roomName, identity, { metadata: JSON.stringify({ role: 'student', hasAudioPriority: true }) });
+
+    socketService.emitToRoom(lecture.roomName, 'grant_audio', { participantId });
+    return { roomName: lecture.roomName, participantId };
   }
 }
 

@@ -7,6 +7,7 @@ import logger from '../infra/logger';
  */
 export interface RoomState {
   isMuted: boolean;
+  isCameraLocked: boolean;
   isRecordingAllowed: boolean;
   lectureId?: string;
   roomName: string;
@@ -46,6 +47,7 @@ class StateService {
 
       return {
         isMuted: data.isMuted === 'true',
+        isCameraLocked: data.isCameraLocked === 'true',
         isRecordingAllowed: data.isRecordingAllowed === 'true',
         lectureId: data.lectureId,
         roomName: data.roomName,

@@ -61,6 +61,32 @@ export class LiveKitService {
       console.error(`[LIVEKIT] Failed to delete room ${roomName}:`, error);
     }
   }
+
+  async muteParticipant(roomName: string, identity: string, trackSid: string, mute: boolean) {
+    this.ensureConfigured();
+    if (!this.host) return;
+    try {
+      const roomService = new RoomServiceClient(this.host, this.apiKey, this.apiSecret);
+      await roomService.mutePublishedTrack(roomName, identity, trackSid, mute);
+      console.log(`[LIVEKIT] Participant ${identity} track ${trackSid} ${mute ? 'muted' : 'unmuted'}.`);
+    } catch (error) {
+      console.error(`[LIVEKIT] Failed to mute track:`, error);
+      throw error;
+    }
+  }
+
+  async removeParticipant(roomName: string, identity: string) {
+    this.ensureConfigured();
+    if (!this.host) return;
+    try {
+      const roomService = new RoomServiceClient(this.host, this.apiKey, this.apiSecret);
+      await roomService.removeParticipant(roomName, identity);
+      console.log(`[LIVEKIT] Participant ${identity} removed from ${roomName}.`);
+    } catch (error) {
+      console.error(`[LIVEKIT] Failed to remove participant:`, error);
+      throw error;
+    }
+  }
 }
 
 export const liveKitService = new LiveKitService();

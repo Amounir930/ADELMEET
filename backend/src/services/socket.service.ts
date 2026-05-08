@@ -28,7 +28,7 @@ class SocketService {
     // Critical for multi-node deployments (Millions of users)
     const pubClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
     const subClient = pubClient.duplicate();
-    
+
     await Promise.all([pubClient.connect(), subClient.connect()]);
     this.io.adapter(createAdapter(pubClient, subClient));
     logger.info('[REDIS-ADAPTER] Distributed Sync Active');
@@ -44,7 +44,7 @@ class SocketService {
       socket.on('teacher:join_room', async ({ roomName, identity }: { roomName: string, identity: string }) => {
         socket.join(roomName);
         logger.info(`[TEACHER-SERVICE] Sovereign Entry: ${identity} joined ${roomName}`);
-        
+
         const state = await stateService.getRoomState(roomName) || { isMuted: false };
         socket.emit('sync_room_state', state);
       });
@@ -103,7 +103,7 @@ class SocketService {
         hardwareId: string, screenIndex?: number, lectureId?: string, roomName?: string, metrics?: any
       }) => {
         // MISSION 04: PERSIST TO DB (History tracking restored)
-        roomOrchestratorService.updateHeartbeat(hardwareId, metrics).catch(() => {});
+        roomOrchestratorService.updateHeartbeat(hardwareId, metrics).catch(() => { });
 
         // MISSION 05: Ingest into health monitor
         if (roomName) {

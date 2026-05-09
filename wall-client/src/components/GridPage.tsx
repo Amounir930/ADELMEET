@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Room, RoomEvent, RemoteParticipant, Track } from 'livekit-client';
+import { Room, RoomEvent, RemoteParticipant } from 'livekit-client';
+
 import { VideoTrack } from './VideoTrack';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
-import { Users, LayoutGrid, Monitor } from 'lucide-react';
+import { Users, LayoutGrid } from 'lucide-react';
+
 import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_URL_BASE || 'http://localhost:5000/api';
@@ -23,7 +25,8 @@ export const GridPage: React.FC = () => {
   const [sessionEnded, setSessionEnded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
-  const [cursorVisible, setCursorVisible] = useState(true);
+  const [cursorVisible] = useState(true);
+
 
   const lectureId = searchParams.get('lecture') || '';
   const hardwareId = searchParams.get('hardwareId') || `hw_${os_hostname()}_${Math.random().toString(36).substring(7)}`;

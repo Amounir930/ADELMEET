@@ -48,8 +48,14 @@ class HealthMonitorService {
     // MISSION 06: AUTOMATIC RECOVERY
     if (existing && existing.status === 'offline' && this.assignmentService) {
       logger.info(`[HEALTH] Display ${data.hardwareId} recovered. Re-registering for rebalance.`);
-      this.assignmentService.registerScreen(data.roomName, Number(data.screenIndex)).catch(() => {});
+      try {
+        await this.assignmentService.registerScreen(data.roomName, Number(data.screenIndex));
+      } catch (recoveryErr) {
+        logger.error(recoveryErr, `[HEALTH] Automatic recovery failed for ${data.hardwareId}:`);
+      }
+
     }
+
 
     const updatedMetrics = { ...defaultMetrics, ...(existing?.metrics ?? {}), ...(data.metrics ?? {}) };
     
@@ -108,18 +114,23 @@ class HealthMonitorService {
   private async triggerAlert(hardwareId: string, roomName: string, screenIndex: number, type: 'OFFLINE' | 'HIGH_CPU' | 'ERROR') {
     logger.warn(`[HEALTH] ⚠️  Display ${hardwareId} alert: ${type}`);
 
-    if (this.io) {
-      this.io.to(roomName).emit('display:alert', {
+    if (!this.io) {
+      logger.warn(`[HEALTH] Cannot emit alert for ${hardwareId} — Socket.io not initialized`);
+      return;
+    }
+
+    this.io.to(roomName).emit('display:alert', {
+
         hardwareId,
         screenIndex: Number(screenIndex),
         type,
         message: `Screen ${Number(screenIndex) + 1} is ${type}`,
         timestamp: Date.now()
       });
-    }
   }
 
   // ─── STATUS BROADCAST ──────────────────────────────────────────────────────
+
 
   async broadcastStatus() {
     if (!this.io) return;

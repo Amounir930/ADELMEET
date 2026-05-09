@@ -16,6 +16,8 @@ interface StudentLiveKitContextType {
   dbStatus: { connected: boolean; status: string };
   socket: Socket | null;
   isRecordingAllowed: boolean;
+  isAlreadyJoining: (lectureId: string) => boolean;
+  markJoining: (lectureId: string, status: boolean) => void;
 }
 
 const StudentLiveKitContext = createContext<StudentLiveKitContextType | undefined>(undefined);
@@ -28,14 +30,24 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isRecordingAllowed, setIsRecordingAllowed] = useState(false);
 
+  // MISSION 12: SYNC LOCK - Preventing Duplicate Join Race Conditions
+  const joiningLock = React.useRef<Record<string, boolean>>({});
+
+  const isAlreadyJoining = (lectureId: string) => !!joiningLock.current[lectureId];
+  const markJoining = (lectureId: string, status: boolean) => {
+    joiningLock.current[lectureId] = status;
+  };
+
   // MISSION 12: SCALE MANDATE - SOCKET ISOLATION
   useEffect(() => {
     const apiBase = import.meta.env.VITE_API_URL_BASE || 'http://localhost:5000/api';
     const socketUrl = apiBase.replace(/\/api$/, '');
     const s = io(socketUrl, { 
-      transports: ['websocket'],
+      transports: ['polling', 'websocket'],
       secure: true,
-      rejectUnauthorized: false
+      rejectUnauthorized: false,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000
     }); 
     setSocket(s);
 
@@ -245,7 +257,7 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [disconnect, room]);
 
   return (
-    <StudentLiveKitContext.Provider value={{ room, connect, disconnect, isConnecting, error, dbStatus, socket, isRecordingAllowed }}>
+    <StudentLiveKitContext.Provider value={{ room, connect, disconnect, isConnecting, error, dbStatus, socket, isRecordingAllowed, isAlreadyJoining, markJoining }}>
       {children}
     </StudentLiveKitContext.Provider>
   );

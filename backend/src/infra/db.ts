@@ -10,7 +10,9 @@ export const connectDB = async () => {
       process.exit(1);
     }
 
-    await mongoose.connect(connStr);
+    // Connect to MongoDB with a timeout to prevent indefinite waiting
+    await mongoose.connect(connStr, { serverSelectionTimeoutMS: 5000 });
+
     logger.info('🚀 MongoDB Connected successfully (LIVE MODE)');
 
     // MISSION 10: REAL-TIME SYNC LAYER

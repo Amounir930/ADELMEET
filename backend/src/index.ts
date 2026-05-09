@@ -26,9 +26,18 @@ const port = process.env.PORT || 5000;
 const server = http.createServer(app);
 
 // Security & Global Middleware
-// ... (rest of the middleware)
-app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: ['https://meet.60sec.shop', 'https://wall.60sec.shop', 'https://api.60sec.shop'],
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false
+}));
+
 app.use(express.json());
 app.use(dbCheckMiddleware);
 
@@ -67,7 +76,7 @@ const startServer = async () => {
     // Initialize Socket.io AFTER infra is ready
     await socketService.init(server);
     
-    server.listen(port, () => {
+    server.listen(Number(port), '0.0.0.0', () => {
       logger.info(`[SERVER] Backend running on port ${port} (Socket.io & Redis Active)`);
     });
   } catch (err) {

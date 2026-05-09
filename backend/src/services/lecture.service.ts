@@ -77,6 +77,19 @@ export class LectureService {
 
     let identity = userRole === 'teacher' ? `${user._id}_teacher` : `${user._id}_student`;
     if (screen) identity = `${identity}_screen_${screen}`;
+    
+    // ROOT SOLUTION: Proactively kick existing session to prevent Reason 2
+    try {
+      console.log(`[LECTURE-SERVICE] Checking for existing participant: ${identity} in room: ${lecture.roomName}`);
+      await Promise.race([
+        liveKitService.removeParticipant(lecture.roomName, identity),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Removal timeout')), 2000))
+      ]).catch(e => console.log(`[LECTURE-SERVICE] Participant removal skipped or timed out: ${e.message}`));
+      
+      await new Promise(resolve => setTimeout(resolve, 100)); // Minimal delay for propagation
+    } catch (e) {
+      console.log(`[LECTURE-SERVICE] Error during participant removal cleanup: ${e}`);
+    }
 
     const token = await liveKitService.generateToken({
       roomName: lecture.roomName,
@@ -87,12 +100,25 @@ export class LectureService {
     });
 
     (lecture.participantsMetadata as any).push(rawMetadata);
-    await lecture.save();
+    
+    // Background save to avoid blocking the join response
+    lecture.save().then(() => {
+      console.log(`[LECTURE-SERVICE] DB Save completed in background`);
+    }).catch(err => {
+      console.error(`[LECTURE-SERVICE] DB Save failed:`, err);
+    });
 
     return {
       token,
       serverUrl: process.env.LIVEKIT_URL,
-      lecture
+      lecture: {
+        _id: lecture._id,
+        roomName: lecture.roomName,
+        title: lecture.title,
+        status: lecture.status,
+        visibility: lecture.visibility,
+        teacherId: (lecture as any).teacher
+      }
     };
   }
 

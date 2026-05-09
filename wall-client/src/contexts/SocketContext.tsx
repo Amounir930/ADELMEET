@@ -20,7 +20,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       transports: ['websocket'],
       secure: true,
       rejectUnauthorized: false,
-      reconnectionAttempts: 10
+      reconnectionAttempts: 10,
+      timeout: 5000,
     });
 
     setSocket(s);
@@ -28,6 +29,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     s.on('connect', () => {
       console.log('[SOVEREIGN-SOCKET] Authority Link Established');
     });
+
+    s.on('disconnect', (reason) => {
+      console.log('[SOVEREIGN-SOCKET] Authority Link Disconnected:', reason);
+    });
+
+    s.on('connect_error', (error) => {
+      console.error('[SOVEREIGN-SOCKET] Connection Error:', error.message);
+    });
+
 
     return () => {
       s.disconnect();

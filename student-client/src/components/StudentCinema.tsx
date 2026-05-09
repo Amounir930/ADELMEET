@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Room, RemoteParticipant, VideoQuality, RoomEvent, Track } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
-import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand, Maximize2, Minimize2 } from 'lucide-react';
 import { useLocalRecorder } from '../hooks/useLocalRecorder';
 import { useLiveKit } from '../contexts/LiveKitContext';
 import { useStudentModeration } from '../hooks/useStudentModeration';
@@ -23,6 +23,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   const [currentQuality, setCurrentQuality] = useState<VideoQuality>(VideoQuality.HIGH);
   const [micRequest, setMicRequest] = useState(false);
   const { isRecording, isPaused, duration, startRecording, stopRecording, pauseRecording, resumeRecording } = useLocalRecorder(room);
+  const [participantCount, setParticipantCount] = useState(room.remoteParticipants.size + 1);
   
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -129,14 +130,25 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       });
     };
 
+    // EVENTS FOR PARTICIPANT COUNT SYNC
+    const updateCount = () => {
+      setParticipantCount(room.remoteParticipants.size + 1);
+    };
+
+    room.on(RoomEvent.ParticipantConnected, updateCount);
+    room.on(RoomEvent.ParticipantDisconnected, updateCount);
+
     // Events that trigger a subscription re-evaluation
     room.on(RoomEvent.ParticipantConnected, manageSubscriptions);
     room.on(RoomEvent.TrackPublished, manageSubscriptions);
     room.on(RoomEvent.ActiveSpeakersChanged, manageSubscriptions);
 
     manageSubscriptions();
+    updateCount();
 
     return () => {
+      room.off(RoomEvent.ParticipantConnected, updateCount);
+      room.off(RoomEvent.ParticipantDisconnected, updateCount);
       room.off(RoomEvent.ParticipantConnected, manageSubscriptions);
       room.off(RoomEvent.TrackPublished, manageSubscriptions);
       room.off(RoomEvent.ActiveSpeakersChanged, manageSubscriptions);
@@ -164,10 +176,19 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       setMicRequest(true);
     });
 
+    socket.on('teacher:lower_hand', (data: any) => {
+      if (data.targetIdentity === room.localParticipant.identity || data.targetIdentity === 'all') {
+        console.log('[STUDENT-HAND] Teacher lowered your hand.');
+        setIsHandRaised(false);
+        showToast('Teacher acknowledged your hand.', 'success');
+      }
+    });
+
     return () => {
       socket.off('request_unmute');
+      socket.off('teacher:lower_hand');
     };
-  }, [socket]);
+  }, [socket, room.localParticipant.identity]);
 
   const handleApproveMic = async () => {
     try {
@@ -179,7 +200,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
     }
   };
 
-  useStudentModeration(room, socket, setIsMicEnabled);
+  useStudentModeration(room, socket, setIsMicEnabled, setIsCameraEnabled);
 
   useEffect(() => {
     if (!room) return;
@@ -252,8 +273,15 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   return (
     <div id="student-cinema-viewport" style={{ height: '100vh', width: '100vw', background: '#0a0a0c', color: '#fff', overflow: 'hidden', position: 'fixed', top: 0, left: 0, zIndex: 9999 }}>
       <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at center, #0f172a 0%, #000 100%)', zIndex: 1 }} />
+      
+      {/* CINEMATIC VIGNETTE */}
+      <div style={{ 
+        position: 'absolute', inset: 0, 
+        background: 'radial-gradient(circle, transparent 20%, rgba(0,0,0,0.4) 100%)', 
+        pointerEvents: 'none', zIndex: 5 
+      }} />
 
-      <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', zIndex: 2 }}>
+      <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
         
         {/* ENFORCED CINEMA FRAME (Adaptive Padding) */}
         <div style={{ flex: 1, padding: isFullscreen ? '0' : '40px 60px', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.5s ease' }}>
@@ -274,11 +302,46 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
               <>
                 <VideoTrack participant={teacher} mode="main" isFullscreen={isFullscreen} onFullscreenToggle={toggleFullscreen} visible={showControls} />
                 
-                {/* LABELS INSIDE THE FRAME */}
-                <div style={{ position: 'absolute', top: isFullscreen ? '40px' : '30px', left: isFullscreen ? '40px' : '30px', zIndex: 100, opacity: showControls ? 1 : 0, transition: 'all 0.5s ease' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                    <div style={{ background: '#ef4444', padding: '6px 14px', borderRadius: '10px', fontSize: '11px', fontWeight: '900', boxShadow: '0 0 15px rgba(239,68,68,0.4)' }}>LIVE</div>
-                    <span style={{ fontSize: '16px', fontWeight: '800', textShadow: '0 2px 10px rgba(0,0,0,0.8)' }}>{lecture?.title || 'Academic Session'}</span>
+                {/* PREMIUM HUD: TOP BAR */}
+                <div style={{ 
+                  position: 'absolute', top: isFullscreen ? '40px' : '30px', 
+                  left: isFullscreen ? '40px' : '30px', right: isFullscreen ? '40px' : '30px',
+                  zIndex: 100, opacity: showControls ? 1 : 0, transition: 'all 0.5s ease',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                    <div style={{ 
+                      background: 'rgba(239, 68, 68, 0.2)', 
+                      border: '1px solid #ef4444',
+                      padding: '6px 14px', borderRadius: '12px', 
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      boxShadow: '0 0 20px rgba(239,68,68,0.3)'
+                    }}>
+                      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444', animation: 'pulse 1.5s infinite' }} />
+                      <span style={{ fontSize: '11px', fontWeight: '900', color: '#ef4444', fontFamily: 'var(--font-display)' }}>LIVE</span>
+                    </div>
+                    <span style={{ 
+                      fontSize: '18px', fontWeight: '800', 
+                      fontFamily: 'var(--font-display)',
+                      textShadow: '0 2px 10px rgba(0,0,0,0.8)',
+                      letterSpacing: '-0.5px'
+                    }}>{lecture?.title || 'Academic Session'}</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px', background: 'rgba(0,0,0,0.4)', padding: '8px 20px', borderRadius: '20px', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.7)' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 'bold' }}>👤 {participantCount} Online</span>
+                    </div>
+                    <div style={{ width: '1px', height: '15px', background: 'rgba(255,255,255,0.2)' }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      {[1, 2, 3, 4].map(i => (
+                        <div key={i} style={{ 
+                          width: '3px', height: `${i * 3}px`, 
+                          background: i <= 3 ? '#10b981' : 'rgba(255,255,255,0.2)', 
+                          borderRadius: '1px' 
+                        }} />
+                      ))}
+                    </div>
                   </div>
                 </div>
               </>
@@ -291,17 +354,60 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
           </div>
         </div>
 
-         {/* CONTROLS BAR */}
         <div style={{ 
           position: 'absolute', bottom: isFullscreen ? '60px' : '40px', left: '50%', transform: `translateX(-50%) translateY(${showControls ? '0' : '40px'})`, 
-          opacity: showControls ? 1 : 0, transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 1000 
+          opacity: showControls ? 1 : 0, transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 1000,
         }}>
-          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(45px)', padding: '12px 30px', borderRadius: '35px', display: 'flex', alignItems: 'center', gap: '20px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 30px 60px rgba(0,0,0,1)' }}>
+          <div className="premium-glass" style={{ 
+            padding: '10px', 
+            paddingRight: '30px',
+            borderRadius: '35px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '20px', 
+          }}>
+            {/* INTEGRATED SELF VIEW PREVIEW */}
+            <div style={{
+              width: '100px',
+              height: '56px',
+              background: '#000',
+              borderRadius: '24px',
+              overflow: 'hidden',
+              border: `2px solid ${isCameraEnabled ? 'rgba(99, 102, 241, 0.6)' : 'rgba(255,255,255,0.1)'}`,
+              position: 'relative',
+              flexShrink: 0,
+              animation: isCameraEnabled ? 'glow-pulse-primary 3s infinite' : 'none'
+            }}>
+              {isCameraEnabled ? (
+                <VideoTrack participant={room.localParticipant} mode="preview" visible={true} />
+              ) : (
+                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1e293b' }}>
+                  <VideoOff size={18} color="rgba(255,255,255,0.2)" />
+                </div>
+              )}
+            </div>
+
              <div style={{ display: 'flex', gap: '15px' }}>
-                <button onClick={toggleMic} style={{ width: '52px', height: '52px', borderRadius: '18px', background: isMicEnabled ? '#10b981' : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={toggleMic} style={{ 
+                  width: '52px', height: '52px', borderRadius: '18px', 
+                  background: isMicEnabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.05)', 
+                  color: isMicEnabled ? '#10b981' : '#fff', 
+                  border: isMicEnabled ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)', 
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  animation: isMicEnabled ? 'glow-pulse-success 2s infinite' : 'none',
+                  transition: 'all 0.3s ease'
+                }}>
                     {isMicEnabled ? <Mic size={24} /> : <MicOff size={24} />}
                 </button>
-                <button onClick={toggleCamera} style={{ width: '52px', height: '52px', borderRadius: '18px', background: isCameraEnabled ? '#6366f1' : 'rgba(255,255,255,0.1)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={toggleCamera} style={{ 
+                  width: '52px', height: '52px', borderRadius: '18px', 
+                  background: isCameraEnabled ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.05)', 
+                  color: isCameraEnabled ? '#6366f1' : '#fff', 
+                  border: isCameraEnabled ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)', 
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  animation: isCameraEnabled ? 'glow-pulse-primary 2s infinite' : 'none',
+                  transition: 'all 0.3s ease'
+                }}>
                     {isCameraEnabled ? <Video size={24} /> : <VideoOff size={24} />}
                 </button>
 
@@ -374,18 +480,41 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                   }}
                   style={{ 
                     width: '52px', height: '52px', borderRadius: '18px', 
-                    background: isHandRaised ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.1)', 
+                    background: isHandRaised ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.05)', 
                     color: isHandRaised ? '#6366f1' : '#fff', 
-                    border: isHandRaised ? '2px solid #6366f1' : 'none', 
+                    border: isHandRaised ? '2px solid #6366f1' : '1px solid rgba(255,255,255,0.1)', 
                     cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    animation: isHandRaised ? 'glow-pulse-primary 2s infinite' : 'none',
                     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                   }}
                   title={isHandRaised ? 'Lower Hand' : 'Raise Hand'}
                 >
                   <Hand size={24} className={isHandRaised ? 'animate-bounce' : ''} />
                 </button>
+
+                <button 
+                  onClick={toggleFullscreen}
+                  style={{ 
+                    width: '52px', height: '52px', borderRadius: '18px', 
+                    background: isFullscreen ? 'rgba(99, 102, 241, 0.3)' : 'rgba(255,255,255,0.05)', 
+                    color: '#fff', 
+                    border: '1px solid rgba(255,255,255,0.1)', 
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.3s ease'
+                  }}
+                  title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
+                </button>
              </div>
-             <button onClick={onDisconnect} style={{ width: '52px', height: '52px', borderRadius: '18px', background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <button onClick={onDisconnect} style={{ 
+               width: '52px', height: '52px', borderRadius: '18px', 
+               background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', 
+               border: '2px solid #ef4444', cursor: 'pointer', 
+               display: 'flex', alignItems: 'center', justifyContent: 'center',
+               boxShadow: '0 0 20px rgba(239, 68, 68, 0.3)',
+               transition: 'all 0.3s ease'
+             }}>
                 <LogOut size={24} />
              </button>
           </div>

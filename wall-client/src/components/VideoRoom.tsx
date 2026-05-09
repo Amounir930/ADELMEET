@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useLiveKit } from '../contexts/LiveKitContext';
 import { useAuth } from '../contexts/AuthContext';
-import { TeacherDashboard } from './TeacherDashboard';
+import { TeacherDashboard } from './TeacherDashboard/index';
 import { Activity, AlertCircle } from 'lucide-react';
 import axios from 'axios';
 

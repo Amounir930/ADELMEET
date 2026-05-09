@@ -21,6 +21,19 @@ export class ValidationError extends AppError {
   }
 }
 
+export class UnauthorizedError extends AppError {
+  constructor(message: string = 'Unauthorized') {
+    super(401, message, 'UNAUTHORIZED');
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Forbidden') {
+    super(403, message, 'FORBIDDEN');
+  }
+}
+
+
 export function extractErrorCode(err: unknown): number {
   if (err instanceof AppError) return err.statusCode;
   if (err instanceof SyntaxError) return 400;

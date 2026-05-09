@@ -7,7 +7,7 @@ import { Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
 interface VideoTrackProps {
   track?: any;
   participant?: Participant | null;
-  mode?: 'main' | 'grid' | 'pip';
+  mode?: 'main' | 'grid' | 'pip' | 'preview';
   isFullscreen?: boolean;
   onFullscreenToggle?: () => void;
   visible?: boolean;
@@ -134,7 +134,7 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={mode === 'pip'}
+          muted={mode === 'pip' || mode === 'preview'}
           style={{
             width: '100%',
             height: '100%',
@@ -181,63 +181,10 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
         </div>
       )}
 
-      {/* Floating Director Controls */}
-      {mode === 'main' && (
-        <div style={{
-          position: 'absolute',
-          top: '20px',
-          right: '20px',
-          display: 'flex',
-          gap: '10px',
-          zIndex: 1000,
-          opacity: visible ? 1 : 0,
-          transform: `translateY(${visible ? '0' : '-10px'})`,
-          transition: 'all 0.4s ease',
-          pointerEvents: visible ? 'auto' : 'none'
-        }}>
-          <button
-            onClick={() => setIsZoomed(!isZoomed)}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(10px)',
-              border: 'none',
-              color: '#fff',
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-            title="Toggle Zoom (Cover/Contain)"
-          >
-            {isZoomed ? <ZoomOut size={18} /> : <ZoomIn size={18} />}
-          </button>
-
-          <button
-            onClick={onFullscreenToggle}
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(10px)',
-              border: 'none',
-              color: '#fff',
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
-        </div>
-      )}
+      {/* Floating Director Controls REMOVED per user request */}
 
       {/* Participant Name Tag */}
-      {mode !== 'pip' && (
+      {mode !== 'pip' && mode !== 'preview' && (
         <div style={{
           position: 'absolute',
           bottom: '20px',

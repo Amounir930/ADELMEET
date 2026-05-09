@@ -32,7 +32,34 @@
   box-sizing: border-box;
 }
 
-body, html, #root {
+body {
+  margin: 0;
+  font-family: var(--font-main);
+  background-color: var(--cinema-bg);
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes glow-pulse-success {
+  0% { box-shadow: 0 0 5px rgba(16, 185, 129, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+  100% { box-shadow: 0 0 5px rgba(16, 185, 129, 0.2); }
+}
+
+@keyframes glow-pulse-primary {
+  0% { box-shadow: 0 0 5px rgba(99, 102, 241, 0.2); }
+  50% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.5); }
+  100% { box-shadow: 0 0 5px rgba(99, 102, 241, 0.2); }
+}
+
+.premium-glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+html, #root {
   width: 100%;
   height: 100%;
   margin: 0;

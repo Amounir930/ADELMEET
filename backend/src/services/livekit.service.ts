@@ -18,7 +18,13 @@ export class LiveKitService {
     this.apiKey = process.env.LIVEKIT_API_KEY || '';
     this.apiSecret = process.env.LIVEKIT_API_SECRET || '';
     this.host = process.env.LIVEKIT_URL?.replace('ws', 'http') || '';
+    
+    // Immediate validation
+    if (!this.apiKey || !this.apiSecret) {
+      console.error('[LIVEKIT] CRITICAL: API keys are missing in environment variables!');
+    }
   }
+
 
   private ensureConfigured() {
     if (!this.apiKey || !this.apiSecret) {

@@ -3,8 +3,15 @@ import jwt from 'jsonwebtoken';
 import { AppError } from '../infra/errors';
 import mongoose from 'mongoose';
 import { User } from '../models/User';
+import logger from '../infra/logger';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_fallback_secret';
+
+// تحسين أمان JWT_SECRET
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  logger.error('[AUTH] FATAL: JWT_SECRET environment variable is not set');
+  process.exit(1);
+}
 
 // Middleware to ensure DB is connected
 export const dbCheckMiddleware = (req: Request, res: Response, next: NextFunction) => {
@@ -33,13 +40,18 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     (req as any).user = decoded;
     next();
   } catch (err) {
-    next(new AppError(401, 'Invalid token', 'AUTH_EXPIRED'));
+    if (err instanceof jwt.JsonWebTokenError) {
+      return next(new AppError(401, 'Invalid token', 'AUTH_EXPIRED'));
+    }
+    next(err);
   }
 };
 
 export const teacherOnly = (req: Request, res: Response, next: NextFunction) => {
-  if ((req as any).user?.role !== 'teacher') {
+  const user = (req as any).user;
+  if (!user || user.role !== 'teacher') {
     return next(new AppError(403, 'Teachers only', 'FORBIDDEN'));
   }
   next();
 };
+

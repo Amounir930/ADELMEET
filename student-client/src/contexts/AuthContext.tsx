@@ -36,14 +36,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string, role: string) => {
-    const res = await axios.post(`${API_BASE}/auth/login`, { email, password, role });
-    const { user: userData, token: userToken } = res.data;
-    
-    setUser(userData);
-    setToken(userToken);
-    localStorage.setItem('user', JSON.stringify(userData));
-    localStorage.setItem('token', userToken);
+    setIsLoading(true);
+    try {
+      const res = await axios.post(`${API_BASE}/auth/login`, { email, password, role });
+      const { user: userData, token: userToken } = res.data;
+      
+      setUser(userData);
+      setToken(userToken);
+      localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('token', userToken);
+    } catch (error: any) {
+      console.error('[AUTH] Login failed:', error.response?.data || error.message);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
   };
+
 
   const logout = () => {
     setUser(null);

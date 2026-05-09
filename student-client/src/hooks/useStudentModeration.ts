@@ -9,7 +9,8 @@ import { Socket } from 'socket.io-client';
 export const useStudentModeration = (
   room: Room | null, 
   socket: Socket | null, 
-  setIsMicEnabled: (val: boolean) => void
+  setIsMicEnabled: (val: boolean) => void,
+  setIsCameraEnabled: (val: boolean) => void
 ) => {
   useEffect(() => {
     if (!room || !socket) return;
@@ -24,25 +25,26 @@ export const useStudentModeration = (
     };
 
     const handleForceCameraOff = (data: any) => {
+      console.log(`[STUDENT-MODERATION] Incoming force_camera_off for: ${data.targetIdentity}`);
       if (data.targetIdentity === 'all' || data.targetIdentity === room.localParticipant.identity) {
         console.warn('[STUDENT-MODERATION] EXECUTION: Locking camera by teacher command.');
         room.localParticipant.setCameraEnabled(false);
+        setIsCameraEnabled(false);
+        // Visual confirmation for debugging
+        if (window.showToast) window.showToast('Teacher has locked your camera.', 'error');
       }
     };
 
     const handleForceUnmute = (data: any) => {
-      if (data.targetIdentity === 'all' || data.targetIdentity === room.localParticipant.identity) {
-        console.warn('[STUDENT-MODERATION] EXECUTION: Unmuting microphone by teacher command.');
-        room.localParticipant.setMicrophoneEnabled(true);
-        setIsMicEnabled(true);
-      }
+      // MISSION 15: PRIVACY OVERRIDE
+      // Teacher can NO LONGER force-open a student's mic.
+      console.warn('[STUDENT-MODERATION] Teacher requested unmute, but privacy rules prevent automatic activation.');
     };
 
     const handleForceCameraOn = (data: any) => {
-      if (data.targetIdentity === 'all' || data.targetIdentity === room.localParticipant.identity) {
-        console.warn('[STUDENT-MODERATION] EXECUTION: Unlocking camera by teacher command.');
-        room.localParticipant.setCameraEnabled(true);
-      }
+      // MISSION 15: PRIVACY OVERRIDE
+      // Teacher can NO LONGER force-open a student's camera.
+      console.warn('[STUDENT-MODERATION] Teacher requested camera-on, but privacy rules prevent automatic activation.');
     };
 
     // Socket Listeners
@@ -53,8 +55,7 @@ export const useStudentModeration = (
     socket.on('force_camera_on', handleForceCameraOn);
     socket.on('lock_cameras', () => handleForceCameraOff({ targetIdentity: 'all' }));
     
-    // MISSION 14: INITIAL STATE SYNC
-    socket.on('sync_room_state', (state: any) => {
+    const handleSync = (state: any) => {
       if (state.isMuted) {
         console.warn('[STUDENT-MODERATION] Room is globally muted. Enforcing silence.');
         handleForceMute({ targetIdentity: 'all' });
@@ -63,8 +64,10 @@ export const useStudentModeration = (
         console.warn('[STUDENT-MODERATION] Room cameras are globally locked.');
         handleForceCameraOff({ targetIdentity: 'all' });
       }
-    });
+    };
 
+    socket.on('sync_room_state', handleSync);
+    
     return () => {
       socket.off('force_mute', handleForceMute);
       socket.off('force_unmute', handleForceUnmute);
@@ -72,7 +75,7 @@ export const useStudentModeration = (
       socket.off('force_camera_off');
       socket.off('force_camera_on');
       socket.off('lock_cameras');
-      socket.off('sync_room_state');
+      socket.off('sync_room_state', handleSync);
     };
-  }, [room, socket, setIsMicEnabled]);
+  }, [room, socket, setIsMicEnabled, setIsCameraEnabled]);
 };

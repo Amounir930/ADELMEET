@@ -21,7 +21,9 @@ class SocketService {
         origin: '*',
         methods: ['GET', 'POST', 'PATCH']
       },
-      transports: ['websocket'] // SCALE MANDATE
+      transports: ['polling', 'websocket'], // Allow polling fallback for tunnel stability
+      pingTimeout: 60000,
+      pingInterval: 25000
     });
 
     // MISSION 07: DISTRIBUTED SYNC (REDIS ADAPTER)
@@ -58,7 +60,18 @@ class SocketService {
 
 
       socket.on('teacher:force_mute', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
+        logger.info(`[TEACHER-COMMAND] Individual Mute: ${targetIdentity} in ${roomName}`);
         this.io?.to(roomName).emit('force_mute', { targetIdentity });
+      });
+
+      socket.on('teacher:force_camera_off', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
+        logger.info(`[TEACHER-COMMAND] Individual Camera Lock: ${targetIdentity} in ${roomName}`);
+        this.io?.to(roomName).emit('force_camera_off', { targetIdentity });
+      });
+
+      socket.on('teacher:lower_hand', ({ roomName, targetIdentity }: { roomName: string, targetIdentity: string }) => {
+        logger.info(`[TEACHER-COMMAND] Lower Hand: ${targetIdentity} in ${roomName}`);
+        this.io?.to(roomName).emit('teacher:lower_hand', { targetIdentity });
       });
 
 

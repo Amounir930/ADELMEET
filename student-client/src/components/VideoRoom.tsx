@@ -10,31 +10,41 @@ const API_BASE = import.meta.env.VITE_API_URL_BASE || 'http://localhost:5000/api
 
 export const VideoRoom: React.FC<{ onDisconnect: () => void }> = ({ onDisconnect }) => {
   const { lectureId } = useParams<{ lectureId: string }>();
-  const { room, connect, disconnect, socket, isConnecting, error: lkError } = useLiveKit();
+  const { room, connect, disconnect, socket, isConnecting, error: lkError, isAlreadyJoining, markJoining } = useLiveKit();
   const { token } = useAuth();
   const [lecture, setLecture] = useState<any>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [hasInteracted] = useState(true);
 
-  const isInitializing = React.useRef(false);
-
   useEffect(() => {
+    const controller = new AbortController();
     setLocalError(null);
 
     const initRoom = async () => {
-      if (!lectureId || !token || room || !hasInteracted || isInitializing.current) return;
+      if (!lectureId || !token || room || !hasInteracted) return;
       
+      // SYNC LOCK: Prevent parallel race conditions from React remounts
+      if (isAlreadyJoining(lectureId)) {
+        console.log('[STUDENT-SECURITY] Join already in progress, skipping redundant call');
+        return;
+      }
+
       try {
-        isInitializing.current = true;
+        markJoining(lectureId, true);
         setLocalError(null);
         console.log(`[STUDENT-VIDEO-ROOM] Initializing Session for ID: ${lectureId}`);
         const res = await axios.post(`${API_BASE}/lectures/${lectureId}/join`, {}, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+          timeout: 10000
         });
         
+        console.log(`[STUDENT-VIDEO-ROOM] Join request returned with status: ${res.status}`);
         setLecture(res.data.lecture);
         await connect(res.data.serverUrl, res.data.token);
       } catch (err: any) {
+        if (axios.isCancel(err)) return;
+        markJoining(lectureId, false);
         setLocalError(err.response?.data?.message || 'Failed to join classroom');
       }
     };
@@ -42,7 +52,8 @@ export const VideoRoom: React.FC<{ onDisconnect: () => void }> = ({ onDisconnect
     initRoom();
 
     return () => {
-      isInitializing.current = false;
+      controller.abort();
+      markJoining(lectureId || '', false);
       // SOVEREIGN SECURITY: Only disconnect if truly unmounting
       console.warn('[STUDENT-SECURITY] Component unmounting, tearing down session...');
       disconnect();

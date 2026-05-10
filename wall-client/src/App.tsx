@@ -38,42 +38,44 @@ const AppRoutes: React.FC = () => {
         U:{user ? 'Y' : 'N'} | L:{currentLecture ? 'Y' : 'N'}
       </div>
 
-      <Routes>
-        <Route path="/login" element={user ? <Navigate to="/" /> : <Login onToggle={() => navigate('/register')} />} />
-        <Route path="/register" element={user ? <Navigate to="/" /> : <Register onToggle={() => navigate('/login')} />} />
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <Routes>
+          <Route path="/login" element={user ? <Navigate to="/" /> : <Login onToggle={() => navigate('/register')} />} />
+          <Route path="/register" element={user ? <Navigate to="/" /> : <Register onToggle={() => navigate('/login')} />} />
 
-        <Route 
-          path="/" 
-          element={
-            user ? (
-              <div style={{ width: '100%', height: '100%' }}>
-                {localError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{localError}</div>}
-                {lkError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{lkError}</div>}
-                <Dashboard onJoin={(roomName: string, screens: number) => navigate(`/room/${roomName}?screens=${screens || 0}`)} />
-              </div>
-            ) : (
-              <Navigate to="/login" />
-            )
-          } 
-        />
+          <Route 
+            path="/" 
+            element={
+              user ? (
+                <div style={{ width: '100%', height: '100%' }}>
+                  {localError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{localError}</div>}
+                  {lkError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{lkError}</div>}
+                  <Dashboard onJoin={(roomName: string, screens: number) => navigate(`/room/${roomName}?screens=${screens || 0}`)} />
+                </div>
+              ) : (
+                <Navigate to="/login" />
+              )
+            } 
+          />
 
-        <Route 
-          path="/room/:lectureId" 
-          element={
-            user ? (
-              <VideoRoom key={window.location.pathname} onDisconnect={() => navigate('/')} />
-            ) : (
-              <Navigate to="/login" />
-            )
-          } 
-        />
+          <Route 
+            path="/room/:lectureId" 
+            element={
+              user ? (
+                <VideoRoom key={window.location.pathname} onDisconnect={() => navigate('/')} />
+              ) : (
+                <Navigate to="/login" />
+              )
+            } 
+          />
 
-        {/* Multi-Display Routes */}
-        <Route path="/grid" element={<GridPage />} />
-        <Route path="/launcher" element={user ? <ScreenLauncher /> : <Navigate to="/login" />} />
+          {/* Multi-Display Routes */}
+          <Route path="/grid" element={<GridPage />} />
+          <Route path="/launcher" element={user ? <ScreenLauncher /> : <Navigate to="/login" />} />
 
-        <Route path="*" element={<Navigate to="/" />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </div>
     </div>
   );
 };

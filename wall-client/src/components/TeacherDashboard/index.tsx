@@ -12,7 +12,8 @@ import { DashboardGrid } from './parts/DashboardGrid';
 import { DashboardControls } from './parts/DashboardControls';
 import { DashboardSidebar } from './parts/DashboardSidebar';
 import { DashboardScreens } from './parts/DashboardScreens';
-import { Users, LayoutGrid, ChevronLeft, ChevronRight } from 'lucide-react';
+import { DashboardChat } from './parts/DashboardChat';
+import { Users, LayoutGrid, MessageSquare, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL_BASE || 'http://localhost:5000/api';
 
@@ -43,11 +44,44 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
 
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'participants' | 'screens'>('participants');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'participants' | 'screens' | 'chat'>('participants');
   const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
   const controlsTimeoutRef = useRef<any | null>(null);
   const [localVideoTrack, setLocalVideoTrack] = useState<any>(null);
+  const [roomState, setRoomState] = useState<any>({ isChatEnabled: true });
+  const [totalUnread, setTotalUnread] = useState(0);
+  const [isHUDOpen, setIsHUDOpen] = useState(false);
+  const hudTimeoutRef = useRef<any | null>(null);
+
+  const triggerHUD = () => {
+    setIsHUDOpen(true);
+    if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+    hudTimeoutRef.current = setTimeout(() => setIsHUDOpen(false), 5000);
+  };
+
+  const [hasHandAlert, setHasHandAlert] = useState(false);
+  const [hasScreenAlert, setHasScreenAlert] = useState(false);
+  const [studentUnreadCounts, setStudentUnreadCounts] = useState<Record<string, number>>({});
+
+  const wakeUp = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 5000); // 5 seconds per request
+  }, []);
+
+  // DRAG & RESIZE STATE
+  const [sidebarPos, setSidebarPos] = useState({ x: 105, y: 50 }); // y is %
+  const [sidebarSize, setSidebarSize] = useState({ width: 380, height: 85 }); // height is vh
+  const [dockPos, setDockPos] = useState({ x: 50, y: 90 }); // x, y are %
+  const [dockScale, setDockScale] = useState(1);
+  const [islandPos, setIslandPos] = useState({ x: 25, y: 50 }); // x is px, y is %
+  const [islandScale, setIslandScale] = useState(1);
+  const [sidebarScale, setSidebarScale] = useState(1);
+
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const [isDraggingDock, setIsDraggingDock] = useState(false);
+  const [isDraggingIsland, setIsDraggingIsland] = useState(false);
 
   const filteredParticipants = classParticipants.filter(p => 
     p.identity.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -61,15 +95,43 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
   };
 
   useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      if (width < 800) {
+        setIslandScale(0.65);
+        setDockScale(0.75);
+        setSidebarScale(0.75);
+        setSidebarSize(prev => ({ ...prev, width: 300, height: 70 }));
+        setIslandPos(prev => ({ ...prev, x: 15 }));
+      } else if (width < 1200) {
+        setIslandScale(0.85);
+        setDockScale(0.9);
+        setSidebarScale(0.9);
+        setSidebarSize(prev => ({ ...prev, width: 340, height: 80 }));
+        setIslandPos(prev => ({ ...prev, x: 20 }));
+      } else {
+        setIslandScale(1);
+        setDockScale(1);
+        setSidebarScale(1);
+        setSidebarSize(prev => ({ ...prev, width: 380, height: 85 }));
+        setIslandPos(prev => ({ ...prev, x: 25 }));
+      }
+    };
+
     const handleActivity = () => {
       setShowControls(true);
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3000);
+      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 5000);
     };
+
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Initial call
     window.addEventListener('mousemove', handleActivity);
-    handleActivity();
+    window.addEventListener('touchstart', handleActivity);
     return () => {
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, []);
@@ -131,7 +193,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
 
     room.remoteParticipants.forEach(attachToParticipant);
     room.on(RoomEvent.ParticipantConnected, (p) => { attachToParticipant(p); handleUpdate(); });
-    room.on(RoomEvent.ParticipantDisconnected, (p) => { setClassParticipants(prev => prev.filter(item => item.identity !== p.identity)); });
+    room.on(RoomEvent.ParticipantDisconnected, (p) => { 
+      setHasScreenAlert(true);
+      wakeUp();
+      setClassParticipants(prev => prev.filter(item => item.identity !== p.identity)); 
+    });
     room.on(RoomEvent.TrackSubscribed, handleUpdate);
     room.on(RoomEvent.TrackUnsubscribed, handleUpdate);
     room.on(RoomEvent.TrackMuted, handleUpdate);
@@ -140,13 +206,39 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     socket.on('participant:raise_hand', ({ identity, raised }: { identity: string, raised: boolean }) => {
       setRaisedHands(prev => {
         const next = new Set(prev);
-        if (raised) next.add(identity); else next.delete(identity);
+        if (raised) {
+          next.add(identity);
+          setHasHandAlert(true);
+          wakeUp();
+        } else {
+          next.delete(identity);
+        }
         return next;
       });
     });
 
+    const handlePrivate = (msg: any) => {
+      if (msg.role !== 'teacher' && (msg.targetIdentity === room.localParticipant.identity || msg.isPrivate)) {
+        setStudentUnreadCounts(prev => ({
+          ...prev,
+          [msg.sender]: (prev[msg.sender] || 0) + 1
+        }));
+        setTotalUnread(prev => prev + 1);
+        wakeUp();
+      }
+    };
+    socket.on('chat:receive_private', handlePrivate);
+
+    const handleMessage = (msg: any) => {
+      if (msg.role !== 'teacher') {
+        wakeUp();
+      }
+    };
+    socket.on('chat:receive_message', handleMessage);
+
     socket.on('sync_room_state', (state: any) => {
       if (state.isRecordingAllowed !== undefined) setIsRecordingAllowed(state.isRecordingAllowed === true || state.isRecordingAllowed === 'true');
+      if (state.isChatEnabled !== undefined) setRoomState((prev: any) => ({ ...prev, isChatEnabled: state.isChatEnabled }));
     });
 
     const handleLocalTrack = (pub: any) => {
@@ -172,11 +264,20 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     startMedia();
 
     return () => {
+      socket.off('participant:raise_hand');
+      socket.off('chat:receive_message', handleMessage);
+      socket.off('chat:receive_private', handlePrivate);
+      socket.off('sync_room_state');
       room.off(RoomEvent.ParticipantConnected, handleUpdate);
       room.off(RoomEvent.ParticipantDisconnected, handleUpdate);
-      socket.off('sync_room_state');
+      room.off(RoomEvent.TrackSubscribed, handleUpdate);
+      room.off(RoomEvent.TrackUnsubscribed, handleUpdate);
+      room.off(RoomEvent.TrackMuted, handleUpdate);
+      room.off(RoomEvent.TrackUnmuted, handleUpdate);
+      room.localParticipant.off(ParticipantEvent.TrackPublished, handleLocalTrack);
+      clearTimeout(updateTimeout);
     };
-  }, [room, socket, updateParticipants]);
+  }, [room, socket, updateParticipants, wakeUp]);
 
   const handleKick = async (studentIdentity: string) => {
     if (!window.confirm(`Are you sure you want to PERMANENTLY ban ${studentIdentity}?`)) return;
@@ -224,6 +325,41 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
     socket?.emit('teacher:toggle_recording_permission', { roomName: room.name, allowed: nextAllowed });
   };
 
+  const handleToggleRoomChat = () => {
+    const nextEnabled = !roomState.isChatEnabled;
+    setRoomState((prev: any) => ({ ...prev, isChatEnabled: nextEnabled }));
+    socket?.emit('teacher:toggle_chat', { roomName: room.name, enabled: nextEnabled });
+  };
+
+  const handleDockDrag = (e: React.MouseEvent) => {
+    if (!isDraggingDock) return;
+    const xPct = (e.clientX / window.innerWidth) * 100;
+    const yPct = (e.clientY / window.innerHeight) * 100;
+    setDockPos({ x: xPct, y: yPct });
+  };
+
+  const handleSidebarDrag = (e: React.MouseEvent) => {
+    if (!isDraggingSidebar) return;
+    setSidebarPos({ 
+      x: e.clientX, 
+      y: (e.clientY / window.innerHeight) * 100 
+    });
+  };
+
+  const handleIslandDrag = (e: React.MouseEvent) => {
+    if (!isDraggingIsland) return;
+    setIslandPos({
+      x: e.clientX,
+      y: (e.clientY / window.innerHeight) * 100
+    });
+  };
+
+  const handleGlobalMouseUp = () => {
+    setIsDraggingSidebar(false);
+    setIsDraggingDock(false);
+    setIsDraggingIsland(false);
+  };
+
   const handleEndSession = async () => {
     if (!window.confirm('Are you sure?')) return;
     setIsEnding(true);
@@ -236,29 +372,84 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
   };
 
   return (
-    <div style={{ 
-      height: '100vh', width: '100vw', display: 'grid', 
-      gridTemplateColumns: isSidebarOpen ? '1fr 450px' : '1fr 60px',
-      background: '#020617', overflow: 'hidden', fontFamily: "'Outfit', sans-serif",
-      transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
-    }}>
-      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        
+    <div 
+      onMouseMove={(e) => { handleDockDrag(e); handleSidebarDrag(e); handleIslandDrag(e); }}
+      onMouseUp={handleGlobalMouseUp}
+      style={{ 
+        height: '100%', width: '100vw', background: '#020617', 
+        overflow: 'hidden', fontFamily: "'Outfit', sans-serif", position: 'relative'
+      }}
+    >
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(99, 102, 241, 0.5);
+          border-radius: 10px;
+          border: 2px solid rgba(15, 23, 42, 0.85);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(99, 102, 241, 0.8);
+        }
+        @keyframes pulse-purple {
+          0% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4); }
+          70% { box-shadow: 0 0 0 15px rgba(168, 85, 247, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0); }
+        }
+        .pulse-chat {
+          animation: pulse-purple 2s infinite;
+        }
+      `}</style>
+      {/* BASE LAYER: FULL SCREEN VIDEO GRID & HUD */}
+      <div style={{ 
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1,
+        display: 'flex', flexDirection: 'column'
+      }}>
         <DashboardHUD 
           connected={!!socket?.connected} 
           participantCount={classParticipants.length} 
-          showControls={showControls} 
+          roomName={room.name}
+          showControls={showControls || isHUDOpen}
         />
-
+        {/* HUD TRIGGER SLOT */}
+        {!showControls && !isHUDOpen && (
+          <div 
+            onClick={triggerHUD}
+            style={{ 
+              position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
+              width: '100px', height: '10px', background: 'rgba(255,255,255,0.05)',
+              borderRadius: '0 0 10px 10px', cursor: 'pointer', zIndex: 1001,
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.height = '15px'}
+            onMouseLeave={(e) => e.currentTarget.style.height = '10px'}
+          />
+        )}
         <DashboardGrid 
-          room={room}
           participants={filteredParticipants}
+          room={room}
           currentPage={currentPage}
           pageSize={PAGE_SIZE}
-          onKick={handleKick}
           onPageChange={setCurrentPage}
         />
+      </div>
 
+      {/* OVERLAY LAYER: FLOATING COMMAND DOCK (BOTTOM) */}
+      <div 
+        style={{
+          position: 'absolute',
+          left: `${dockPos.x}%`,
+          top: `${dockPos.y}%`,
+          transform: `translate(-50%, -50%) scale(${dockScale})`,
+          zIndex: 10001,
+          transition: isDraggingDock ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
         <DashboardControls 
           room={room}
           showControls={showControls}
@@ -268,12 +459,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
           isRecording={isRecording}
           isPaused={isPaused}
           duration={duration}
-          isAddingScreen={isAddingScreen}
-          isEnding={isEnding}
-          targetScreens={targetScreens}
           localVideoTrack={localVideoTrack}
-          lecture={lecture}
-          socket={socket}
           onToggleMic={() => { room.localParticipant.setMicrophoneEnabled(!isMicEnabled); setIsMicEnabled(!isMicEnabled); }}
           onToggleCamera={() => { room.localParticipant.setCameraEnabled(!isCameraEnabled); setIsCameraEnabled(!isCameraEnabled); }}
           onToggleFullscreen={toggleFullscreen}
@@ -281,111 +467,233 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ room, onDisc
           onStopRecording={stopRecording}
           onPauseRecording={pauseRecording}
           onResumeRecording={resumeRecording}
-          onAddScreen={() => {}} 
-          onRefreshScreens={() => socket?.emit('teacher:display_command', { roomName: room.name, command: 'refresh' })}
-          onCloseAllScreens={() => socket?.emit('teacher:display_command', { roomName: room.name, command: 'close_all' })}
           onEndSession={handleEndSession}
           formatDuration={formatDuration}
-          setTargetScreens={setTargetScreens}
-          setIsAddingScreen={setIsAddingScreen}
+          onStartDrag={() => setIsDraggingDock(true)}
+          onScaleChange={setDockScale}
+          currentScale={dockScale}
         />
       </div>
 
-      {/* DYNAMIC SIDEBAR HUB */}
+      {/* OVERLAY LAYER: FLOATING SIDEBAR ISLANDS (LEFT) */}
       <div style={{ 
+        position: 'absolute', 
+        left: `${islandPos.x}px`, 
+        top: `${islandPos.y}%`, 
+        transform: `translate(-50%, -50%) scale(${islandScale})`,
+        zIndex: 10000, 
         display: 'flex', 
-        background: 'rgba(15, 23, 42, 0.98)', 
-        borderLeft: '1px solid rgba(255,255,255,0.1)', 
-        overflow: 'hidden'
+        flexDirection: 'column', 
+        gap: '15px',
+        background: 'rgba(15, 23, 42, 0.4)', 
+        backdropFilter: 'blur(25px)',
+        padding: '15px', 
+        borderRadius: '30px', 
+        border: '1px solid rgba(255,255,255,0.1)',
+        boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+        transition: isDraggingIsland ? 'none' : 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease',
+        opacity: showControls ? 1 : 0,
+        pointerEvents: showControls ? 'all' : 'none'
       }}>
-        {/* VERTICAL TAB SWITCHER */}
-        <div style={{ 
-          width: '60px', 
-          background: 'rgba(15, 23, 42, 0.5)', 
-          borderRight: isSidebarOpen ? '1px solid rgba(255,255,255,0.05)' : 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '20px 0',
-          gap: '20px',
-          flexShrink: 0
-        }}>
-          <button 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            {isSidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-          </button>
-          
-          <div style={{ width: '30px', height: '1px', background: 'rgba(255,255,255,0.1)' }} />
-
-          <button 
-            onClick={() => { setActiveTab('participants'); setIsSidebarOpen(true); }}
-            style={{ 
-              width: '40px', height: '40px', borderRadius: '12px', 
-              background: activeTab === 'participants' ? 'rgba(99, 102, 241, 0.2)' : 'transparent', 
-              color: activeTab === 'participants' ? '#6366f1' : 'rgba(255,255,255,0.4)', 
-              border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.3s ease'
-            }}
-            title="Students List"
-          >
-            <Users size={20} />
-          </button>
-
-          <button 
-            onClick={() => { setActiveTab('screens'); setIsSidebarOpen(true); }}
-            style={{ 
-              width: '40px', height: '40px', borderRadius: '12px', 
-              background: activeTab === 'screens' ? 'rgba(34, 197, 94, 0.2)' : 'transparent', 
-              color: activeTab === 'screens' ? '#22c55e' : 'rgba(255,255,255,0.4)', 
-              border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.3s ease'
-            }}
-            title="Screens Management"
-          >
-            <LayoutGrid size={20} />
-          </button>
+        {/* DRAG HANDLE FOR ISLAND */}
+        <div 
+          onMouseDown={() => setIsDraggingIsland(true)}
+          style={{ width: '100%', height: '15px', cursor: 'grab', display: 'flex', gap: '3px', justifyContent: 'center', opacity: 0.3 }}>
+          {[...Array(3)].map((_, i) => <div key={i} style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#fff' }} />)}
         </div>
 
-        {/* TAB CONTENT CONTAINER */}
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {activeTab === 'participants' ? (
-            <DashboardSidebar 
-              room={room}
-              socket={socket}
-              isSidebarOpen={isSidebarOpen}
-              participantCount={classParticipants.length}
-              isRecordingAllowed={isRecordingAllowed}
-              searchQuery={searchQuery}
-              allTimeParticipants={allTimeParticipants}
-              raisedHands={raisedHands}
-              onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-              onToggleMuteAll={handleToggleClassMute}
-              onToggleLockAll={handleToggleClassCamera}
-              onToggleRecordingPermission={handleToggleRecordingPermission}
-              onSearchChange={setSearchQuery}
-              onMuteStudent={handleMuteStudent}
-              onLockCamera={handleLockStudentCamera}
-              onGrantAudio={handleGrantAudio}
-              onKick={handleKick}
-              onLowerHand={handleLowerHand}
-            />
-          ) : (
-            <DashboardScreens 
-              socket={socket}
-              roomName={room.name}
-              isSidebarOpen={isSidebarOpen}
-              onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-              targetScreens={targetScreens}
-              setTargetScreens={setTargetScreens}
-              setIsAddingScreen={setIsAddingScreen}
-              isAddingScreen={isAddingScreen}
-              lecture={lecture}
-            />
+        {/* SCALE BUTTONS FOR ISLAND */}
+        <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+          <button onClick={() => setIslandScale(s => Math.min(1.5, s + 0.1))} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}>+</button>
+          <button onClick={() => setIslandScale(s => Math.max(0.6, s - 0.1))} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '10px', cursor: 'pointer', padding: '2px 6px' }}>-</button>
+        </div>
+
+        <button 
+          onClick={() => { 
+            setActiveTab('participants'); 
+            setIsSidebarOpen(activeTab !== 'participants' || !isSidebarOpen); 
+            if (activeTab !== 'participants' || !isSidebarOpen) setHasHandAlert(false);
+          }}
+          className={hasHandAlert ? 'pulse-alert-teacher' : ''}
+          style={{ 
+            width: '50px', height: '50px', borderRadius: '20px', 
+            background: activeTab === 'participants' && isSidebarOpen ? 'rgba(99, 102, 241, 0.2)' : (hasHandAlert ? 'rgba(239, 68, 68, 0.15)' : 'transparent'), 
+            color: activeTab === 'participants' && isSidebarOpen ? '#6366f1' : (hasHandAlert ? '#ef4444' : 'rgba(255,255,255,0.5)'), 
+            border: hasHandAlert ? '1px solid #ef4444' : 'none',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}
+          title="Participants"
+        >
+          <Users size={24} />
+        </button>
+
+        <button 
+          onClick={() => { 
+            setActiveTab('screens'); 
+            setIsSidebarOpen(activeTab !== 'screens' || !isSidebarOpen); 
+            if (activeTab !== 'screens' || !isSidebarOpen) setHasScreenAlert(false);
+          }}
+          className={hasScreenAlert ? 'pulse-alert-teacher' : ''}
+          style={{ 
+            width: '50px', height: '50px', borderRadius: '20px', 
+            background: activeTab === 'screens' && isSidebarOpen ? 'rgba(34, 197, 94, 0.2)' : (hasScreenAlert ? 'rgba(239, 68, 68, 0.15)' : 'transparent'), 
+            color: activeTab === 'screens' && isSidebarOpen ? '#22c55e' : (hasScreenAlert ? '#ef4444' : 'rgba(255,255,255,0.5)'), 
+            border: hasScreenAlert ? '1px solid #ef4444' : 'none',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}
+          title="Screens"
+        >
+          <LayoutGrid size={24} />
+        </button>
+
+        <button 
+          onClick={() => { 
+            setActiveTab('chat'); 
+            setIsSidebarOpen(activeTab !== 'chat' || !isSidebarOpen);
+            if (activeTab === 'chat' && !isSidebarOpen) setTotalUnread(0);
+          }}
+          className={totalUnread > 0 ? 'pulse-alert-teacher' : ''}
+          style={{ 
+            width: '50px', height: '50px', borderRadius: '20px', 
+            background: activeTab === 'chat' && isSidebarOpen ? 'rgba(168, 85, 247, 0.2)' : (totalUnread > 0 ? 'rgba(239, 68, 68, 0.15)' : 'transparent'), 
+            color: activeTab === 'chat' && isSidebarOpen ? '#a855f7' : (totalUnread > 0 ? '#ef4444' : 'rgba(255,255,255,0.5)'), 
+            border: totalUnread > 0 ? '1px solid #ef4444' : 'none', 
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            position: 'relative'
+          }}
+          title="Chat Hub"
+        >
+          <MessageSquare size={24} />
+          {totalUnread > 0 && (
+            <div style={{
+              position: 'absolute', top: '-5px', right: '-5px',
+              background: '#ef4444', color: '#fff', fontSize: '10px', fontWeight: 'bold',
+              minWidth: '18px', height: '18px', borderRadius: '9px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '2px solid #020617', boxShadow: '0 0 10px rgba(239, 68, 68, 0.5)'
+            }}>
+              {totalUnread}
+            </div>
           )}
+        </button>
+      </div>
+
+      {/* OVERLAY LAYER: FLOATING GLASS PANELS (CONTENT) */}
+      <div 
+        style={{ 
+          position: 'absolute', 
+          left: `${sidebarPos.x}px`, 
+          top: `${sidebarPos.y}%`, 
+          transform: `translateY(-50%) translateX(${isSidebarOpen ? '0' : '-120%'}) scale(${sidebarScale})`,
+          width: `${sidebarSize.width}px`, 
+          height: `${sidebarSize.height}vh`, 
+          zIndex: 9999, 
+          transition: isDraggingSidebar ? 'none' : 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease',
+          opacity: (showControls && isSidebarOpen) ? 1 : 0, 
+          transformOrigin: 'left center',
+          pointerEvents: (showControls && isSidebarOpen) ? 'all' : 'none',
+        }}
+      >
+        <div style={{ 
+          width: '100%', height: '100%', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(40px)',
+          borderRadius: '35px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 40px 100px rgba(0,0,0,0.6)',
+          overflow: 'hidden', display: 'grid', gridTemplateRows: '40px 1fr', position: 'relative'
+        }}>
+          {/* INTERNAL DRAG HANDLE & SCALE CONTROLS (HEADER) */}
+          <div style={{ 
+            width: '100%', height: '40px', background: 'rgba(255,255,255,0.03)', 
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px',
+            cursor: 'default', borderBottom: '1px solid rgba(255,255,255,0.05)'
+          }}>
+            <div 
+              onMouseDown={() => setIsDraggingSidebar(true)}
+              style={{ flex: 1, height: '100%', display: 'flex', alignItems: 'center', cursor: 'grab' }}
+            >
+              <div style={{ display: 'flex', gap: '3px' }}>
+                {[...Array(3)].map((_, i) => <div key={i} style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'rgba(255,255,255,0.3)' }} />)}
+              </div>
+              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', fontWeight: '800', marginLeft: '10px', letterSpacing: '1px' }}>DRAG TO MOVE</span>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={() => setSidebarSize(prev => ({ ...prev, height: Math.min(95, prev.height + 5) }))}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '12px', cursor: 'pointer', width: '24px', height: '24px' }}
+              >+</button>
+              <button 
+                onClick={() => setSidebarSize(prev => ({ ...prev, height: Math.max(40, prev.height - 5) }))}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '4px', color: '#fff', fontSize: '12px', cursor: 'pointer', width: '24px', height: '24px' }}
+              >-</button>
+            </div>
+          </div>
+          {/* Resize Handle for Sidebar */}
+          <div 
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              const startX = e.clientX;
+              const startW = sidebarSize.width;
+              const onMove = (moveEvent: MouseEvent) => {
+                setSidebarSize(prev => ({ ...prev, width: Math.max(300, startW + (moveEvent.clientX - startX)) }));
+              };
+              const onUp = () => {
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+              };
+              window.addEventListener('mousemove', onMove);
+              window.addEventListener('mouseup', onUp);
+            }}
+            style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '10px', cursor: 'ew-resize', zIndex: 100 }} 
+          />
+
+          <div style={{ minHeight: 0, height: '100%', width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {activeTab === 'participants' ? (
+              <DashboardSidebar 
+                room={room} socket={socket} isSidebarOpen={true}
+                participantCount={classParticipants.length} isRecordingAllowed={isRecordingAllowed}
+                searchQuery={searchQuery} allTimeParticipants={allTimeParticipants}
+                raisedHands={raisedHands} onToggleSidebar={() => setIsSidebarOpen(false)}
+                onToggleMuteAll={handleToggleClassMute} onToggleLockAll={handleToggleClassCamera}
+                onToggleRecordingPermission={handleToggleRecordingPermission} onSearchChange={setSearchQuery}
+                onMuteStudent={handleMuteStudent} onLockCamera={handleLockStudentCamera}
+                onToggleRoomChat={handleToggleRoomChat} isChatEnabled={roomState.isChatEnabled}
+                onGrantAudio={handleGrantAudio} onKick={handleKick} onLowerHand={handleLowerHand}
+                studentUnreadCounts={studentUnreadCounts}
+                hasHandAlert={hasHandAlert}
+                hasScreenAlert={hasScreenAlert}
+              />
+            ) : activeTab === 'screens' ? (
+              <DashboardScreens 
+                socket={socket} roomName={room.name} isSidebarOpen={true}
+                onToggleSidebar={() => setIsSidebarOpen(false)} targetScreens={targetScreens}
+                setTargetScreens={setTargetScreens} setIsAddingScreen={setIsAddingScreen}
+                isAddingScreen={isAddingScreen} lecture={lecture}
+              />
+            ) : (
+              <DashboardChat 
+                socket={socket} room={room} isSidebarOpen={true}
+                participants={classParticipants} isChatEnabled={roomState.isChatEnabled}
+                onUnreadUpdate={setTotalUnread}
+                onStudentUnreadUpdate={(identity, count) => {
+                  setStudentUnreadCounts(prev => ({ ...prev, [identity]: count }));
+                }}
+              />
+            )}
+          </div>
         </div>
       </div>
+      <style>{`
+        .pulse-alert-teacher {
+          animation: pulse-alert-teacher 1.5s infinite;
+        }
+        @keyframes pulse-alert-teacher {
+          0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+          50% { transform: scale(1.1); box-shadow: 0 0 20px 10px rgba(239, 68, 68, 0); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+      `}</style>
     </div>
   );
 };

@@ -93,13 +93,6 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({ participant, room, mode 
     return () => { actualTrack.detach(el); };
   }, [audioTrack, isMicEnabled, participant.identity, room?.localParticipant.identity, hasAudioPriority]);
 
-  const socket = io();
-
-  useEffect(() => {
-    socket.on('participant-updated', (data: any) => {
-      if (data.participantId === participant.identity) updateTracks();
-    });
-  }, [socket, participant.identity, updateTracks]);
 
   return (
     <div style={{ width: '100%', height: '100%', background: '#000', position: 'relative', overflow: 'hidden' }}>

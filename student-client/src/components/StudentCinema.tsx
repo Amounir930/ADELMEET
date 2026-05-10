@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Room, RemoteParticipant, VideoQuality, RoomEvent, Track } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
-import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand, Maximize2, Minimize2 } from 'lucide-react';
+import { StudentChat } from './StudentChat';
+import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand, Maximize2, Minimize2, MessageSquare } from 'lucide-react';
 import { useLocalRecorder } from '../hooks/useLocalRecorder';
 import { useLiveKit } from '../contexts/LiveKitContext';
 import { useStudentModeration } from '../hooks/useStudentModeration';
@@ -22,6 +23,8 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   const [showControls, setShowControls] = useState(true);
   const [currentQuality, setCurrentQuality] = useState<VideoQuality>(VideoQuality.HIGH);
   const [micRequest, setMicRequest] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [hasNewPrivate, setHasNewPrivate] = useState(false);
   const { isRecording, isPaused, duration, startRecording, stopRecording, pauseRecording, resumeRecording } = useLocalRecorder(room);
   const [participantCount, setParticipantCount] = useState(room.remoteParticipants.size + 1);
   
@@ -159,8 +162,22 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   const resetControlsTimer = useCallback(() => {
     setShowControls(true);
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    if (teacher) controlsTimerRef.current = setTimeout(() => setShowControls(false), 4000);
-  }, [teacher]);
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), 5000); // 5 seconds per request
+  }, []);
+
+  const [dockScale, setDockScale] = useState(1);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      if (width < 600) setDockScale(0.75);
+      else if (width < 1000) setDockScale(0.9);
+      else setDockScale(1);
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const handleAction = () => resetControlsTimer();
@@ -174,6 +191,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
     socket.on('request_unmute', () => {
       console.log('[STUDENT-PRIVACY] Teacher requested mic access.');
       setMicRequest(true);
+      resetControlsTimer();
     });
 
     socket.on('teacher:lower_hand', (data: any) => {
@@ -181,6 +199,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
         console.log('[STUDENT-HAND] Teacher lowered your hand.');
         setIsHandRaised(false);
         showToast('Teacher acknowledged your hand.', 'success');
+        resetControlsTimer();
       }
     });
 
@@ -355,8 +374,9 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
         </div>
 
         <div style={{ 
-          position: 'absolute', bottom: isFullscreen ? '60px' : '40px', left: '50%', transform: `translateX(-50%) translateY(${showControls ? '0' : '40px'})`, 
-          opacity: showControls ? 1 : 0, transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 1000,
+          position: 'absolute', bottom: '25px', left: '50%', transform: `translateX(-50%) translateY(${showControls ? '0' : '150%'}) scale(${dockScale})`,
+          zIndex: 1000, transition: 'all 0.6s cubic-bezier(0.23, 1, 0.32, 1)',
+          pointerEvents: showControls ? 'auto' : 'none'
         }}>
           <div className="premium-glass" style={{ 
             padding: '10px', 
@@ -506,6 +526,36 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                 >
                   {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
                 </button>
+
+                <button 
+                  onClick={() => {
+                    setIsChatOpen(!isChatOpen);
+                    setHasNewPrivate(false);
+                  }}
+                  className={hasNewPrivate ? 'pulse-alert' : ''}
+                  style={{ 
+                    width: '52px', height: '52px', borderRadius: '18px', 
+                    background: isChatOpen ? 'rgba(99, 102, 241, 0.3)' : (hasNewPrivate ? 'rgba(168, 85, 247, 0.4)' : 'rgba(255,255,255,0.05)'), 
+                    color: hasNewPrivate ? '#a855f7' : '#fff', 
+                    border: hasNewPrivate ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', 
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.3s ease',
+                    position: 'relative',
+                    boxShadow: hasNewPrivate ? '0 0 20px rgba(168, 85, 247, 0.5)' : 'none'
+                  }}
+                  title="Toggle Chat"
+                >
+                  <MessageSquare size={24} />
+                  {hasNewPrivate && (
+                    <div style={{
+                      position: 'absolute', top: '-5px', right: '-5px',
+                      background: '#ef4444', color: '#fff', fontSize: '10px', fontWeight: 'bold',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '2px solid #0a0a0c', boxShadow: '0 0 10px rgba(239, 68, 68, 0.5)'
+                    }}>!</div>
+                  )}
+                </button>
              </div>
              <button onClick={onDisconnect} style={{ 
                width: '52px', height: '52px', borderRadius: '18px', 
@@ -609,7 +659,25 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
         </div>
       )}
 
+      <StudentChat 
+        socket={socket} 
+        room={room} 
+        isOpen={isChatOpen} 
+        onClose={() => setIsChatOpen(false)} 
+        onNewPrivate={() => {
+          setHasNewPrivate(true);
+          resetControlsTimer();
+        }}
+      />
+
       <style>{`
+        @keyframes pulse-alert {
+          0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); border-color: #ef4444; }
+          25% { transform: scale(1.15); box-shadow: 0 0 40px 20px rgba(168, 85, 247, 0.4); border-color: #a855f7; }
+          50% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); border-color: #ef4444; }
+          75% { transform: scale(1.15); box-shadow: 0 0 40px 20px rgba(168, 85, 247, 0.4); border-color: #a855f7; }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); border-color: #ef4444; }
+        }
         @keyframes toastIn {
           from { transform: translate(-50%, 100%) scale(0.8); opacity: 0; }
           to { transform: translate(-50%, 0) scale(1); opacity: 1; }

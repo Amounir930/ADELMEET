@@ -57,7 +57,18 @@ class HealthMonitorService {
     }
 
 
-    const updatedMetrics = { ...defaultMetrics, ...(existing?.metrics ?? {}), ...(data.metrics ?? {}) };
+    let existingMetrics = {};
+    if (typeof existing?.metrics === 'string') {
+      try {
+        existingMetrics = JSON.parse(existing.metrics);
+      } catch (e) {
+        logger.warn(`[HEALTH] Failed to parse existing metrics for ${data.hardwareId}, using defaults`);
+      }
+    } else if (existing?.metrics) {
+      existingMetrics = existing.metrics;
+    }
+
+    const updatedMetrics = { ...defaultMetrics, ...existingMetrics, ...(data.metrics ?? {}) };
     
     await stateService.updateHealth(data.hardwareId, {
       screenIndex: data.screenIndex,
@@ -136,22 +147,46 @@ class HealthMonitorService {
     if (!this.io) return;
     const allHealth = await stateService.getAllHealth();
 
-    const byRoom = new Map<string, any[]>();
+    const byRoom = new Map<string, Map<number, any>>();
     Object.entries(allHealth).forEach(([hardwareId, s]) => {
-      const list = byRoom.get(s.roomName) ?? [];
-      list.push({
+      const roomName = s.roomName;
+      const screenIndex = Number(s.screenIndex);
+      
+      let metrics = {};
+      if (typeof s.metrics === 'string') {
+        try {
+          metrics = JSON.parse(s.metrics);
+        } catch (e) {
+          logger.warn(`[HEALTH] Failed to parse metrics for ${hardwareId} during broadcast`);
+        }
+      } else if (s.metrics) {
+        metrics = s.metrics;
+      }
+
+      const screenData = {
         hardwareId,
-        screenIndex: Number(s.screenIndex),
+        screenIndex,
         status: s.status,
-        metrics: typeof s.metrics === 'string' ? JSON.parse(s.metrics) : s.metrics,
+        metrics,
         lastHeartbeat: Number(s.lastSeen),
         secondsSinceHeartbeat: Math.floor((Date.now() - Number(s.lastSeen)) / 1000)
-      });
-      byRoom.set(s.roomName, list);
+      };
+
+      const roomMap = byRoom.get(roomName) ?? new Map<number, any>();
+      const existing = roomMap.get(screenIndex);
+
+      // Deduplication Logic: Prefer online over offline, or more recent heartbeat
+      if (!existing || 
+          (screenData.status === 'online' && existing.status !== 'online') ||
+          (screenData.status === existing.status && screenData.lastHeartbeat > existing.lastHeartbeat)) {
+        roomMap.set(screenIndex, screenData);
+      }
+      
+      byRoom.set(roomName, roomMap);
     });
 
-    byRoom.forEach((screens, roomName) => {
-      const payload = screens.sort((a, b) => a.screenIndex - b.screenIndex);
+    byRoom.forEach((screenMap, roomName) => {
+      const payload = Array.from(screenMap.values()).sort((a, b) => a.screenIndex - b.screenIndex);
       this.io!.to(roomName).emit('display:status_update', { screens: payload });
     });
   }

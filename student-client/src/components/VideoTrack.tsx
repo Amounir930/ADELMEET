@@ -46,8 +46,6 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
     if (!participant) return;
 
     const handleUpdate = () => {
-      console.log(`[STUDENT-VIDEO-TRACK] Resolving Media for ${participant.identity} (Local: ${participant.isLocal})`);
-
       // MISSION 12: AGGRESSIVE TRACK DISCOVERY (LOCAL + REMOTE)
       const vTrack = participant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack ||
         participant.getTrackPublication(Track.Source.Camera)?.videoTrack ||
@@ -57,7 +55,6 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
         Array.from(participant.audioTrackPublications.values())[0]?.audioTrack;
 
       if (vTrack && vTrack.sid !== (resolvedVideoTrack?.sid)) {
-        console.log(`[STUDENT-VIDEO-TRACK] Found Video: ${vTrack.sid}`);
         setResolvedVideoTrack(vTrack);
       }
       if (aTrack && aTrack.sid !== (resolvedAudioTrack?.sid)) {
@@ -67,12 +64,10 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
 
     participant.on(ParticipantEvent.TrackPublished, handleUpdate);
     participant.on(ParticipantEvent.TrackUnpublished, handleUpdate);
+    participant.on(ParticipantEvent.TrackSubscribed, handleUpdate);
+    participant.on(ParticipantEvent.TrackUnsubscribed, handleUpdate);
 
-    // MISSION 12: SOVEREIGN MEDIA SYNC ENGINE
-    // Retries resolution for 10 seconds to catch delayed local tracks
-    const syncInterval = setInterval(handleUpdate, 1000);
-    setTimeout(() => clearInterval(syncInterval), 10000);
-
+    // Initial check
     handleUpdate();
 
     return () => {
@@ -80,7 +75,6 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
       participant.off(ParticipantEvent.TrackUnsubscribed, handleUpdate);
       participant.off(ParticipantEvent.TrackPublished, handleUpdate);
       participant.off(ParticipantEvent.TrackUnpublished, handleUpdate);
-      clearInterval(syncInterval);
     };
   }, [participant]);
 
@@ -92,16 +86,10 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
     // Avoid re-attaching if already attached to same track
     if ((el as any)._attachedTrackSid === resolvedVideoTrack.sid) return;
 
-    console.log('[CINEMA-ENGINE] Binding Sovereign Track:', resolvedVideoTrack.sid);
     resolvedVideoTrack.attach(el);
     (el as any)._attachedTrackSid = resolvedVideoTrack.sid;
     
-    el.play().catch(e => {
-      // Mission 13: Silent expected errors to clean logs
-      if (e.name !== 'AbortError' && e.name !== 'NotAllowedError') {
-        console.warn('[VIDEO-ENGINE] Play failed:', e);
-      }
-    });
+    el.play().catch(() => {});
 
     return () => {
       resolvedVideoTrack.detach(el);

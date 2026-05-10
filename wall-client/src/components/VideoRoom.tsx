@@ -97,7 +97,7 @@ export const VideoRoom: React.FC<{ onDisconnect: () => void }> = ({ onDisconnect
   }
 
   return (
-    <div onContextMenu={(e) => e.preventDefault()}>
+    <div onContextMenu={(e) => e.preventDefault()} style={{ height: '100%', width: '100%' }}>
       <TeacherDashboard 
         room={room} 
         lecture={lecture} 

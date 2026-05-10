@@ -81,12 +81,12 @@ export const VideoRoom: React.FC<{ onDisconnect: () => void }> = ({ onDisconnect
     };
   }, [socket, room, disconnect]);
 
-  if (localError || lkError) {
+  if (localError) {
     return (
       <div style={{ height: '100vh', background: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', textAlign: 'center', padding: '20px' }}>
         <AlertCircle size={50} color="#ef4444" style={{ marginBottom: '20px' }} />
         <h2 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px' }}>Access Revoked</h2>
-        <p style={{ opacity: 0.6, maxWidth: '400px', marginBottom: '30px' }}>{localError || lkError}</p>
+        <p style={{ opacity: 0.6, maxWidth: '400px', marginBottom: '30px' }}>{localError}</p>
         <button onClick={onDisconnect} style={{ background: '#6366f1', color: 'white', border: 'none', padding: '12px 30px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
           Return to Profile
         </button>

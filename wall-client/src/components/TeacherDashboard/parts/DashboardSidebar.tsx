@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Room, Track, RemoteParticipant } from 'livekit-client';
-import { Mic, MicOff, Video, VideoOff, ShieldCheck, ShieldAlert, Search, ChevronLeft, ChevronRight, Hand, XSquare, PlusSquare } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, ShieldCheck, ShieldAlert, Search, ChevronLeft, ChevronRight, Hand, XSquare, PlusSquare, MessageSquare } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 
 interface DashboardSidebarProps {
@@ -22,6 +22,11 @@ interface DashboardSidebarProps {
   onGrantAudio: (identity: string) => void;
   onKick: (identity: string) => void;
   onLowerHand: (identity: string) => void;
+  onToggleRoomChat: () => void;
+  isChatEnabled: boolean;
+  studentUnreadCounts: Record<string, number>;
+  hasHandAlert: boolean;
+  hasScreenAlert: boolean;
 }
 
 export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
@@ -42,15 +47,24 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   onLockCamera,
   onGrantAudio,
   onKick,
-  onLowerHand
+  onLowerHand,
+  onToggleRoomChat,
+  isChatEnabled,
+  studentUnreadCounts,
+  hasHandAlert,
+  hasScreenAlert
 }) => {
   const [muteStatus, setMuteStatus] = useState<'idle' | 'sending'>('idle');
   const [lockStatus, setLockStatus] = useState<'idle' | 'sending'>('idle');
   const [recStatus, setRecStatus] = useState<'idle' | 'sending'>('idle');
+  const [chatStatus, setChatStatus] = useState<'idle' | 'sending'>('idle');
 
   return (
     <div style={{ 
       flex: 1,
+      minHeight: 0,
+      height: '100%',
+      overflow: 'hidden',
       padding: '25px', 
       display: 'flex', 
       flexDirection: 'column',
@@ -66,10 +80,10 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
         </span>
       </div>
 
-      {/* MISSION 14: GLOBAL COMMAND HUB */}
+      {/* MISSION 14: GLOBAL COMMAND HUB (NOW 2x2 GRID) */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(3, 1fr)', 
+        gridTemplateColumns: 'repeat(2, 1fr)', 
         gap: '10px', 
         marginBottom: '20px',
         padding: '15px',
@@ -88,8 +102,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             background: muteStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.1)',
             color: muteStatus === 'sending' ? '#10b981' : '#ef4444',
             border: `1px solid ${muteStatus === 'sending' ? '#10b981' : 'rgba(239, 68, 68, 0.2)'}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease',
-            transform: muteStatus === 'sending' ? 'scale(0.95)' : 'scale(1)'
+            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
           }}
         >
           <MicOff size={20} />
@@ -107,8 +120,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             background: lockStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.1)',
             color: lockStatus === 'sending' ? '#10b981' : '#ef4444',
             border: `1px solid ${lockStatus === 'sending' ? '#10b981' : 'rgba(239, 68, 68, 0.2)'}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease',
-            transform: lockStatus === 'sending' ? 'scale(0.95)' : 'scale(1)'
+            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
           }}
         >
           <VideoOff size={20} />
@@ -126,12 +138,29 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             background: recStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : (isRecordingAllowed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)'),
             color: recStatus === 'sending' ? '#10b981' : (isRecordingAllowed ? '#22c55e' : '#94a3b8'),
             border: `1px solid ${recStatus === 'sending' ? '#10b981' : (isRecordingAllowed ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.1)')}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease',
-            transform: recStatus === 'sending' ? 'scale(0.95)' : 'scale(1)'
+            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
           }}
         >
           {recStatus === 'sending' ? <ShieldCheck size={20} /> : (isRecordingAllowed ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />)}
           <span style={{ fontSize: '10px', fontWeight: '900' }}>{recStatus === 'sending' ? 'UPDATED!' : (isRecordingAllowed ? 'STU-REC: ON' : 'STU-REC: OFF')}</span>
+        </button>
+
+        <button 
+          onClick={() => {
+            setChatStatus('sending');
+            onToggleRoomChat();
+            setTimeout(() => setChatStatus('idle'), 2000);
+          }}
+          style={{ 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
+            background: chatStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : (isChatEnabled ? 'rgba(99, 102, 241, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
+            color: chatStatus === 'sending' ? '#10b981' : (isChatEnabled ? '#6366f1' : '#ef4444'),
+            border: `1px solid ${chatStatus === 'sending' ? '#10b981' : (isChatEnabled ? 'rgba(99, 102, 241, 0.2)' : 'rgba(239, 68, 68, 0.2)')}`,
+            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
+          }}
+        >
+          <MessageSquare size={20} />
+          <span style={{ fontSize: '10px', fontWeight: '900' }}>{chatStatus === 'sending' ? 'UPDATED!' : (isChatEnabled ? 'CHAT: ON' : 'CHAT: OFF')}</span>
         </button>
       </div>
       
@@ -146,7 +175,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
         />
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', paddingRight: '10px' }} className="custom-scrollbar">
         {allTimeParticipants
           .sort((a, b) => {
             // SMART SORT: Hand Raised students always at the top
@@ -196,6 +225,15 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                     <span style={{ color: '#fff', fontSize: '13px', fontWeight: '900', letterSpacing: '0.5px' }}>
                       {pData.name || pData.identity.split('_student')[0]}
                     </span>
+                    {studentUnreadCounts[pData.identity] > 0 && (
+                      <div style={{
+                        background: '#ef4444', color: '#fff', fontSize: '10px', fontWeight: 'bold',
+                        minWidth: '18px', height: '18px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        boxShadow: '0 0 10px rgba(239, 68, 68, 0.5)', padding: '0 5px'
+                      }}>
+                        {studentUnreadCounts[pData.identity]}
+                      </div>
+                    )}
                   </div>
                   
                   {hasHandRaised && (

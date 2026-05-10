@@ -26,12 +26,12 @@ export const DashboardGrid: React.FC<DashboardGridProps> = ({
   return (
     <div style={{ 
       flex: 1, 
-      padding: '10px', 
+      padding: '50px 10px 10px 10px', 
       overflow: 'hidden', 
       position: 'relative', 
       background: '#000',
       borderRadius: '32px',
-      margin: '10px',
+      margin: '0 15px 15px 15px', // Removed top margin
       border: '1px solid rgba(255,255,255,0.05)',
       boxShadow: 'inset 0 0 50px rgba(0,0,0,0.5)'
     }}>

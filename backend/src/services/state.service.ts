@@ -9,6 +9,7 @@ export interface RoomState {
   isMuted: boolean;
   isCameraLocked: boolean;
   isRecordingAllowed: boolean;
+  isChatEnabled: boolean;
   lectureId?: string;
   roomName: string;
   status: 'live' | 'completed';
@@ -49,6 +50,7 @@ class StateService {
         isMuted: data.isMuted === 'true',
         isCameraLocked: data.isCameraLocked === 'true',
         isRecordingAllowed: data.isRecordingAllowed === 'true',
+        isChatEnabled: data.isChatEnabled !== 'false', // Default to true if not present
         lectureId: data.lectureId,
         roomName: data.roomName,
         status: data.status as any
@@ -101,7 +103,10 @@ class StateService {
     try {
       const flatMetrics: string[] = ['lastSeen', Date.now().toString()];
       Object.entries(metrics).forEach(([k, v]) => {
-        if (k !== 'lastSeen') flatMetrics.push(k, String(v));
+        if (k !== 'lastSeen') {
+          const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+          flatMetrics.push(k, value);
+        }
       });
 
       await redisClient.hSet(key, flatMetrics);
@@ -143,6 +148,23 @@ class StateService {
       logger.error(`[STATE] Failed to fetch all health records: ${err.message || err}`);
       return {};
     }
+  }
+
+  // MISSION 12: EPHEMERAL CHAT PERSISTENCE
+  async saveChatMessage(roomName: string, message: any): Promise<void> {
+    const key = `chat:messages:${roomName}`;
+    await redisClient.rPush(key, JSON.stringify(message));
+    await redisClient.expire(key, 86400); // 24h safety expiry
+  }
+
+  async getChatMessages(roomName: string): Promise<any[]> {
+    const key = `chat:messages:${roomName}`;
+    const data = await redisClient.lRange(key, 0, -1);
+    return data.map(m => JSON.parse(m));
+  }
+
+  async clearChatMessages(roomName: string): Promise<void> {
+    await redisClient.del(`chat:messages:${roomName}`);
   }
 }
 

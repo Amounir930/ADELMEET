@@ -16,22 +16,25 @@ export const useStudentModeration = (
     if (!room || !socket) return;
 
     const handleForceMute = (data: any) => {
-      console.log(`[STUDENT-MODERATION] Incoming force_mute for: ${data.targetIdentity}`);
       if (data.targetIdentity === 'all' || data.targetIdentity === room.localParticipant.identity) {
-        console.warn('[STUDENT-MODERATION] EXECUTION: Muting local microphone by teacher command.');
-        room.localParticipant.setMicrophoneEnabled(false);
-        setIsMicEnabled(false);
+        // MISSION 15: State Check to prevent infinite loops
+        if (room.localParticipant.isMicrophoneEnabled) {
+          console.warn('[STUDENT-MODERATION] EXECUTION: Muting local microphone by teacher command.');
+          room.localParticipant.setMicrophoneEnabled(false);
+          setIsMicEnabled(false);
+        }
       }
     };
 
     const handleForceCameraOff = (data: any) => {
-      console.log(`[STUDENT-MODERATION] Incoming force_camera_off for: ${data.targetIdentity}`);
       if (data.targetIdentity === 'all' || data.targetIdentity === room.localParticipant.identity) {
-        console.warn('[STUDENT-MODERATION] EXECUTION: Locking camera by teacher command.');
-        room.localParticipant.setCameraEnabled(false);
-        setIsCameraEnabled(false);
-        // Visual confirmation for debugging
-        if (window.showToast) window.showToast('Teacher has locked your camera.', 'error');
+        // MISSION 15: State Check to prevent infinite loops
+        if (room.localParticipant.isCameraEnabled) {
+          console.warn('[STUDENT-MODERATION] EXECUTION: Locking camera by teacher command.');
+          room.localParticipant.setCameraEnabled(false);
+          setIsCameraEnabled(false);
+          if (window.showToast) window.showToast('Teacher has locked your camera.', 'error');
+        }
       }
     };
 

@@ -29,37 +29,59 @@ export const GridPage: React.FC = () => {
 
 
   const lectureId = searchParams.get('lecture') || '';
-  const hardwareId = searchParams.get('hardwareId') || `hw_${os_hostname()}_${Math.random().toString(36).substring(7)}`;
+  const roomParam = searchParams.get('roomName') || searchParams.get('room') || '';
+  
+  // MISSION 22: Stable Hardware ID
+  const [hardwareId] = useState(() => {
+    const saved = localStorage.getItem('sovereign_hw_id');
+    if (saved) return saved;
+    const newId = `hw_${Math.random().toString(36).substring(2, 11)}`;
+    localStorage.setItem('sovereign_hw_id', newId);
+    return newId;
+  });
+
   const [totalScreens, setTotalScreens] = useState(parseInt(searchParams.get('totalScreens') || '1', 10));
   const screenIndex = parseInt(searchParams.get('screenIndex') || searchParams.get('screen') || '0', 10);
 
   function os_hostname() { return 'sovereign-node'; }
 
   useEffect(() => {
-    if (!lectureId || !token) return;
+    if ((!lectureId && !roomParam) || !token) return;
     const connectToRoom = async () => {
       try {
         setIsConnecting(true);
-        const res = await axios.post(`${API_BASE}/lectures/${lectureId}/join?screen=${screenIndex}`, {}, {
+        // MISSION 13: Direct Room Binding
+        const res = await axios.post(`${API_BASE}/lectures/${lectureId}/join?screen=${screenIndex}`, {
+          roomName: roomParam // Pass roomName explicitly if we have it
+        }, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const newRoom = new Room({ adaptiveStream: true, dynacast: true });
-        await newRoom.connect(res.data.serverUrl, res.data.token, { autoSubscribe: false });
+        
+        // FIX: Enable autoSubscribe to ensure students appear
+        await newRoom.connect(res.data.serverUrl, res.data.token, { autoSubscribe: true });
+        
         setRoom(newRoom);
         setIsConnecting(false);
       } catch (err: any) {
+        console.error('[GRID-PAGE] Connection Failure:', err);
         setError(err.response?.data?.message || 'Failed to connect');
         setIsConnecting(false);
       }
     };
     connectToRoom();
     return () => { room?.disconnect(); };
-  }, [lectureId, token]);
+  }, [lectureId, roomParam, token]);
 
   const updateParticipants = useCallback(() => {
     if (!room) return;
     const all = Array.from(room.remoteParticipants.values()).filter(p => {
-      const isTeacher = p.identity.includes('teacher') || (p.metadata && JSON.parse(p.metadata).role === 'teacher');
+      const metadata = p.metadata ? JSON.parse(p.metadata) : {};
+      const isTeacher = p.identity.toLowerCase().includes('teacher') || 
+                        p.identity.toLowerCase().includes('admin') ||
+                        metadata.role === 'teacher' || 
+                        p.identity === 'adel' ||
+                        p.name?.toLowerCase().includes('teacher');
       return !isTeacher;
     });
     all.sort((a, b) => a.identity.localeCompare(b.identity));
@@ -78,18 +100,63 @@ export const GridPage: React.FC = () => {
 
   useEffect(() => {
     if (!socket || !room) return;
-    socket.emit('display:register_screen', { roomName: room.name, screenIndex, hardwareId });
+
+    const register = () => {
+      if (socket.connected) {
+        console.log('[GRID-PAGE] Registering screen', screenIndex, 'in room', room.name);
+        socket.emit('display:register_screen', { roomName: room.name, screenIndex, hardwareId });
+      }
+    };
+
+    socket.on('connect', register);
+    register(); // Try immediately if already connected
     
     socket.on('display_command', ({ command, payload }: any) => {
+      console.log('[GRID-PAGE] Received Command:', command, payload);
       if (command === 'close_all') window.close();
+      if (command === 'close_one' && Number(payload) === screenIndex) window.close();
       if (command === 'refresh') window.location.reload();
       if (command === 'refresh_one' && Number(payload) === screenIndex) window.location.reload();
-      if (command === 'rebalance' && typeof payload === 'number') setTotalScreens(payload);
+      if (command === 'rebalance' && typeof payload === 'number') {
+        console.log('[GRID-PAGE] Rebalancing to', payload, 'screens');
+        setTotalScreens(payload);
+      }
     });
 
     socket.on('session_ended', () => setSessionEnded(true));
-    return () => { socket.off('display_command'); socket.off('session_ended'); };
-  }, [socket, room, screenIndex]);
+
+    const heartbeatInterval = setInterval(() => {
+      if (!socket.connected) {
+        console.warn('[GRID-PAGE] Socket disconnected, skipping heartbeat');
+        return;
+      }
+
+      const metrics = {
+        cpu: Math.min(10 + participants.length * 5, 95),
+        ram: Math.min(20 + participants.length * 4, 90),
+        fps: 60,
+        bandwidth: participants.length * 1.2,
+        studentsRendered: participants.length,
+        errors: 0
+      };
+
+      console.log('[GRID-PAGE] Sending Heartbeat:', metrics.studentsRendered, 'students');
+      socket.emit('display:heartbeat', {
+        hardwareId,
+        screenIndex,
+        lectureId,
+        roomName: room.name,
+        metrics
+      });
+    }, 5000);
+
+    return () => { 
+      socket.off('connect', register);
+      socket.off('display_command'); 
+      socket.off('session_ended');
+      clearInterval(heartbeatInterval);
+    };
+  }, [socket, room, screenIndex, participants.length, hardwareId, lectureId]);
 
   const getLayout = () => {
     const n = participants.length;

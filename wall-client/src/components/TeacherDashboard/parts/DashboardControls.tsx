@@ -33,6 +33,9 @@ interface DashboardControlsProps {
   formatDuration: (s: number) => string;
   setTargetScreens: (n: number) => void;
   setIsAddingScreen: (b: boolean) => void;
+  onStartDrag?: () => void;
+  onScaleChange?: (scale: number) => void;
+  currentScale?: number;
 }
 
 const commandButtonStyle = {
@@ -61,12 +64,7 @@ export const DashboardControls: React.FC<DashboardControlsProps> = ({
   isRecording,
   isPaused,
   duration,
-  isAddingScreen,
-  isEnding,
-  targetScreens,
   localVideoTrack,
-  lecture,
-  socket,
   onToggleMic,
   onToggleCamera,
   onToggleFullscreen,
@@ -74,131 +72,135 @@ export const DashboardControls: React.FC<DashboardControlsProps> = ({
   onStopRecording,
   onPauseRecording,
   onResumeRecording,
-  onAddScreen,
-  onRefreshScreens,
-  onCloseAllScreens,
   onEndSession,
   formatDuration,
-  setTargetScreens,
-  setIsAddingScreen
+  onStartDrag,
+  onScaleChange,
+  currentScale = 1
 }) => {
   return (
     <div style={{ 
-      position: 'fixed', 
-      bottom: '30px', 
-      left: '50%', 
-      transform: `translateX(-50%) translateY(${showControls ? '0' : '120px'})`, 
-      zIndex: 99999, 
-      display: 'flex', 
-      justifyContent: 'center',
-      pointerEvents: 'all',
-      width: 'auto',
-      transition: 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.5s ease',
+      position: 'relative',
+      zIndex: 1000, 
+      transition: 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
       opacity: showControls ? 1 : 0
     }}>
       <div style={{
-        background: 'rgba(15, 23, 42, 0.75)',
-        backdropFilter: 'blur(30px)',
-        padding: '12px 35px',
-        borderRadius: '35px',
-        border: '1px solid rgba(255,255,255,0.12)',
+        background: 'rgba(15, 23, 42, 0.5)',
+        backdropFilter: 'blur(40px)',
+        padding: '10px 20px',
+        borderRadius: '30px',
+        border: '1px solid rgba(255,255,255,0.15)',
         display: 'flex',
         alignItems: 'center',
-        gap: '35px',
+        gap: '15px',
         boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
-        transition: 'all 0.3s ease'
       }}>
-
-        {/* Teacher Preview (Enlarged & Professional) */}
-        <div style={{
-          width: '160px',
-          height: '90px',
-          borderRadius: '20px',
-          overflow: 'hidden',
-          position: 'relative',
-          border: '2px solid #6366f1',
-          boxShadow: '0 8px 25px rgba(99, 102, 241, 0.3)',
-          background: '#000'
-        }}>
-          <VideoTrack participant={room.localParticipant} room={room} mode="grid" track={localVideoTrack} />
-          <div style={{ position: 'absolute', top: '5px', left: '10px', fontSize: '9px', fontWeight: 'bold', color: '#6366f1', zIndex: 30, textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>TEACHER VIEW</div>
+        {/* DRAG HANDLE */}
+        <div 
+          onMouseDown={onStartDrag}
+          style={{ 
+            width: '30px', height: '45px', borderRadius: '12px', background: 'rgba(255,255,255,0.05)',
+            display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center', justifyContent: 'center',
+            cursor: 'grab', flexShrink: 0
+          }}
+          title="Drag to Move"
+        >
+          {[...Array(3)].map((_, i) => (
+            <div key={i} style={{ width: '12px', height: '2px', background: 'rgba(255,255,255,0.3)', borderRadius: '1px' }} />
+          ))}
         </div>
 
-        <div style={{ width: '1px', height: '40px', background: 'rgba(255,255,255,0.1)' }}></div>
+        {/* SCALE CONTROLS */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <button 
+            onClick={() => onScaleChange?.(Math.min(1.5, currentScale + 0.1))}
+            style={{ width: '24px', height: '20px', background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >+</button>
+          <button 
+            onClick={() => onScaleChange?.(Math.max(0.6, currentScale - 0.1))}
+            style={{ width: '24px', height: '20px', background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '6px', color: '#fff', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >-</button>
+        </div>
 
-        {/* GROUP 1: PERSONAL MEDIA & VIEW */}
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '5px 15px', background: 'rgba(255,255,255,0.03)', borderRadius: '25px', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+        
+        {/* PREVIEW MINI-ISLAND */}
+        <div style={{
+          width: '70px', height: '40px', borderRadius: '12px', overflow: 'hidden',
+          border: '1px solid rgba(99, 102, 241, 0.5)', background: '#000',
+          position: 'relative', boxShadow: '0 5px 15px rgba(0,0,0,0.3)', flexShrink: 0
+        }}>
+          <VideoTrack participant={room.localParticipant} room={room} mode="grid" track={localVideoTrack} />
+        </div>
+
+        <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
+
+        {/* MEDIA CONTROLS */}
+        <div style={{ display: 'flex', gap: '12px' }}>
           <button 
             onClick={onToggleMic}
             style={{
-              ...commandButtonStyle,
+              width: '45px', height: '45px', borderRadius: '15px', border: 'none',
               background: isMicEnabled ? 'rgba(255,255,255,0.05)' : '#ef4444',
-              border: '1px solid rgba(255,255,255,0.1)',
-              minWidth: 'auto',
-              padding: '12px'
+              color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.3s ease',
+              boxShadow: !isMicEnabled ? '0 5px 15px rgba(239, 68, 68, 0.3)' : 'none'
             }}
-            title="Toggle My Mic"
           >
-            {isMicEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+            {isMicEnabled ? <Mic size={18} /> : <MicOff size={18} />}
           </button>
 
           <button 
             onClick={onToggleCamera}
             style={{
-              ...commandButtonStyle,
+              width: '45px', height: '45px', borderRadius: '15px', border: 'none',
               background: isCameraEnabled ? 'rgba(255,255,255,0.05)' : '#ef4444',
-              border: '1px solid rgba(255,255,255,0.1)',
-              minWidth: 'auto',
-              padding: '12px'
+              color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.3s ease',
+              boxShadow: !isCameraEnabled ? '0 5px 15px rgba(239, 68, 68, 0.3)' : 'none'
             }}
-            title="Toggle My Camera"
           >
-            {isCameraEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+            {isCameraEnabled ? <Video size={18} /> : <VideoOff size={18} />}
           </button>
+        </div>
 
+        {/* UTILITY CONTROLS */}
+        <div style={{ display: 'flex', gap: '12px' }}>
           <button 
             onClick={onToggleFullscreen}
             style={{
-              ...commandButtonStyle,
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              minWidth: 'auto',
-              padding: '12px'
+              width: '45px', height: '45px', borderRadius: '15px', border: 'none',
+              background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s'
             }}
-            title="Toggle Fullscreen"
           >
-            {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <div style={{ display: 'flex', gap: '5px' }}>
             <button 
               onClick={isRecording ? onStopRecording : onStartRecording}
               style={{
-                ...commandButtonStyle,
+                height: '45px', padding: '0 15px', borderRadius: '15px', border: 'none',
                 background: isRecording ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.05)',
-                color: isRecording ? '#ef4444' : '#fff',
-                border: isRecording ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.1)',
-                minWidth: 'auto', padding: '12px'
+                color: isRecording ? '#ef4444' : '#fff', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.3s',
+                border: isRecording ? '1px solid rgba(239,68,68,0.2)' : '1px solid transparent'
               }}
-              title={isRecording ? 'Stop Recording' : 'Start My Recording'}
             >
-              {isRecording ? <StopCircle size={20} className="animate-pulse" /> : <Circle size={20} />}
-              <span style={{ fontSize: '10px', fontWeight: 'bold' }}>
-                {isRecording ? formatDuration(duration) : 'REC'}
-              </span>
+              {isRecording ? <StopCircle size={18} className="animate-pulse" /> : <Circle size={18} />}
+              <span style={{ fontSize: '11px', fontWeight: '900' }}>{isRecording ? formatDuration(duration) : 'REC'}</span>
             </button>
-
             {isRecording && (
               <button 
                 onClick={isPaused ? onResumeRecording : onPauseRecording}
                 style={{
-                  ...commandButtonStyle,
-                  background: isPaused ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                  color: isPaused ? '#10b981' : '#fff',
-                  border: isPaused ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
-                  minWidth: 'auto', padding: '12px'
+                  width: '40px', height: '45px', borderRadius: '12px', border: 'none',
+                  background: isPaused ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)',
+                  color: isPaused ? '#10b981' : '#fff', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }}
-                title={isPaused ? 'Resume' : 'Pause'}
               >
                 {isPaused ? <Play size={14} fill="currentColor" /> : <Pause size={14} fill="currentColor" />}
               </button>
@@ -206,20 +208,21 @@ export const DashboardControls: React.FC<DashboardControlsProps> = ({
           </div>
         </div>
 
+        <div style={{ width: '1px', height: '30px', background: 'rgba(255,255,255,0.1)' }} />
 
-        <div style={{ width: '1px', height: '40px', background: 'rgba(255,255,255,0.1)' }}></div>
-
+        {/* END SESSION */}
         <button 
           onClick={onEndSession}
-          disabled={isEnding}
           style={{
-            ...commandButtonStyle,
-            background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
-            boxShadow: '0 8px 25px rgba(239, 68, 68, 0.4)'
+            height: '45px', padding: '0 25px', borderRadius: '15px', border: 'none',
+            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+            color: '#fff', fontSize: '12px', fontWeight: '900', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '8px',
+            boxShadow: '0 10px 20px rgba(239, 68, 68, 0.3)', transition: 'all 0.3s'
           }}
         >
           <PhoneOff size={18} />
-          <span>{isEnding ? 'ENDING...' : 'END'}</span>
+          <span>END SESSION</span>
         </button>
       </div>
     </div>

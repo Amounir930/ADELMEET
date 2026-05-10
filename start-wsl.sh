@@ -1,5 +1,6 @@
 #!/bin/bash
-PROJECT_ROOT="/mnt/c/Users/Dell/Desktop/learn/meet-2"
+PROJECT_ROOT="/home/adel/projects/meet-2-hardened"
+
 cd $PROJECT_ROOT/backend && nohup npm run dev > $PROJECT_ROOT/backend.log 2>&1 &
 cd $PROJECT_ROOT/student-client && nohup npm run dev > $PROJECT_ROOT/student.log 2>&1 &
 cd $PROJECT_ROOT/wall-client && nohup npm run dev > $PROJECT_ROOT/wall.log 2>&1 &

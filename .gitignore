@@ -40,3 +40,7 @@ ssh key.txt
 *.log
 *.pub
 *.key
+*.zip
+*.rar
+*.7z
+ADELMEET_Core.zip

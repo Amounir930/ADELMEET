@@ -28,6 +28,7 @@ interface DashboardScreensProps {
   setIsAddingScreen: (b: boolean) => void;
   isAddingScreen: boolean;
   lecture: any;
+  onOnlineScreensChange?: (count: number) => void;
 }
 
 const commandButtonStyle = {
@@ -58,9 +59,10 @@ const MetricBadge: React.FC<{ label: string; value: number; unit: string; warn: 
     color = value >= danger ? '#ef4444' : value >= warn ? '#f59e0b' : '#10b981';
   }
   return (
-    <span style={{ fontSize: '9px', color, fontWeight: '800', background: `${color}11`, padding: '2px 6px', borderRadius: '4px', border: `1px solid ${color}22` }}>
-      {label} {Math.round(value)}{unit}
-    </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', background: 'rgba(255,255,255,0.03)', padding: '6px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+      <span style={{ fontSize: '9px', fontWeight: 'bold', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: '11px', fontWeight: '900', color }}>{Math.round(value)}{unit}</span>
+    </div>
   );
 };
 
@@ -72,7 +74,8 @@ export const DashboardScreens: React.FC<DashboardScreensProps> = ({
   setTargetScreens,
   setIsAddingScreen,
   isAddingScreen,
-  lecture
+  lecture,
+  onOnlineScreensChange
 }) => {
   const [screens, setScreens] = useState<ScreenHealth[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +99,10 @@ export const DashboardScreens: React.FC<DashboardScreensProps> = ({
     const handleStatus = ({ screens: data }: { screens: ScreenHealth[] }) => {
       console.log('[SCREENS-HUB] Live Update Received:', data.length, 'screens');
       setScreens(data);
+      if (onOnlineScreensChange) {
+        const onlineCount = data.filter((s: any) => s.status === 'online').length;
+        onOnlineScreensChange(onlineCount);
+      }
     };
     
     socket.on('display:status_update', handleStatus);

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Lecture } from '../models/Lecture';
+import { Attendance } from '../models/Attendance';
 import { User } from '../models/User';
 import { AppError } from '../infra/errors';
 import { liveKitService } from './livekit.service';
@@ -36,13 +37,14 @@ export class LectureService {
   }
 
   async getAvailableLectures(userId: string, userRole: string) {
-    let query: any = { status: { $ne: 'completed' } };
+    let query: any = {};
     if (userRole === 'teacher') {
       query.teacher = userId;
     } else {
+      query.status = { $ne: 'completed' };
       query.visibility = 'public';
     }
-    return await Lecture.find(query).sort({ scheduledAt: 1 }).lean();
+    return await Lecture.find(query).sort({ scheduledAt: -1 }).lean();
   }
 
   async generateAccessSession(lectureIdOrTitle: string, userId: string, userRole: string, screen?: string) {
@@ -60,6 +62,15 @@ export class LectureService {
 
     if (lecture.bannedUsers && (lecture.bannedUsers as any).includes(userId)) {
       throw new AppError(403, 'You have been banned from this session', 'USER_BANNED');
+    }
+
+    // ROOM LOCK: Block new students from getting a token if room is locked (teachers always bypass)
+    if (userRole === 'student') {
+      const { stateService } = await import('./state.service');
+      const roomState = await stateService.getRoomState(lecture.roomName);
+      if (roomState?.isRoomLocked) {
+        throw new AppError(423, 'المحاضرة مغلقة من قِبَل المعلم', 'ROOM_LOCKED');
+      }
     }
 
     const user = await User.findById(userId);
@@ -99,12 +110,32 @@ export class LectureService {
       metadata: JSON.stringify(rawMetadata)
     });
 
+    // MISSION 12: Clean up previous active sessions for this identity
+    // to prevent race conditions with 'participant_left' webhooks.
+    const now = new Date();
+    const existingActive = await Attendance.find({ identity, lecture: lecture._id, status: 'active' });
+    for (const oldAtt of existingActive) {
+      oldAtt.leaveTime = now;
+      oldAtt.status = 'completed';
+      oldAtt.duration = Math.max(1, Math.floor((now.getTime() - oldAtt.joinTime.getTime()) / 1000));
+      await oldAtt.save();
+    }
+
+    // MISSION 12: PROACTIVE ATTENDANCE (WEBHOOK FALLBACK)
+    await Attendance.create({
+      lecture: lecture._id,
+      user: userId,
+      userName: userRole === 'teacher' ? (screen ? `${user.name} (Screen ${screen})` : `${user.name}`) : user.name,
+      userRole: userRole,
+      identity: identity,
+      joinTime: new Date(),
+      status: 'active'
+    }).catch(err => console.error('[LECTURE-SERVICE] Proactive attendance failed:', err));
+
     (lecture.participantsMetadata as any).push(rawMetadata);
     
     // Background save to avoid blocking the join response
-    lecture.save().then(() => {
-      console.log(`[LECTURE-SERVICE] DB Save completed in background`);
-    }).catch(err => {
+    lecture.save().catch(err => {
       console.error(`[LECTURE-SERVICE] DB Save failed:`, err);
     });
 
@@ -134,7 +165,23 @@ export class LectureService {
     if (!lecture) throw new AppError(404, 'Unauthorized or missing lecture', 'LECTURE_FORBIDDEN');
 
     lecture.status = 'completed';
+    lecture.endedAt = new Date();
     await lecture.save();
+
+    // MISSION 12: AUTO-CLOSE ATTENDANCE
+    // If some participants are still 'active', close them now
+    const now = new Date();
+    const activeAttendances = await Attendance.find({ lecture: lecture._id, status: 'active' });
+    
+    console.log(`[LECTURE-SERVICE] Finalizing lecture ${lecture._id}. Closing ${activeAttendances.length} active sessions.`);
+
+    for (const att of activeAttendances) {
+      att.leaveTime = now;
+      att.status = 'completed';
+      // Ensure at least 1s duration if they were active
+      att.duration = Math.max(1, Math.floor((now.getTime() - att.joinTime.getTime()) / 1000));
+      await att.save();
+    }
 
     socketService.emitToRoom(lecture.roomName, 'db_sync', { 
       collection: 'lectures', 
@@ -144,6 +191,21 @@ export class LectureService {
     });
 
     return lecture;
+  }
+
+  async deleteLecture(id: string, teacherId: string) {
+    const lecture = await Lecture.findOne({ _id: id, teacher: teacherId });
+    if (!lecture) throw new AppError(404, 'Lecture not found or unauthorized', 'LECTURE_MISSING');
+
+    await Lecture.deleteOne({ _id: id });
+    // Proactively cleanup attendance logs for this session to keep DB lean
+    await Attendance.deleteMany({ lecture: id });
+    
+    // Notify room if active
+    socketService.emitToRoom(lecture.roomName, 'session_ended', { lectureId: id, deleted: true });
+    liveKitService.deleteRoom(lecture.roomName).catch(e => console.error('Failed to teardown LK room', e));
+
+    return { id, success: true };
   }
 
   async updateStatus(lectureId: string, status: string, teacherId: string) {
@@ -168,6 +230,9 @@ export class LectureService {
       await lecture.save();
     }
 
+    // MISSION 12: Stable Identity
+    // We use userId + role + screen to keep it stable during re-renders
+    // but unique enough for different devices/roles.
     const identity = `${studentId}_student`;
     await liveKitService.removeParticipant(lecture.roomName, identity).catch(e => console.error('LK Eject Failed', e));
     
@@ -195,6 +260,46 @@ export class LectureService {
 
     socketService.emitToRoom(lecture.roomName, 'grant_audio', { participantId });
     return { roomName: lecture.roomName, participantId };
+  }
+
+  async getLectureAttendance(lectureId: string, teacherId: string) {
+    const lecture = await Lecture.findOne({ _id: lectureId, teacher: teacherId });
+    if (!lecture) throw new AppError(404, 'Lecture not found or unauthorized', 'LECTURE_MISSING');
+
+    const queryId = mongoose.isValidObjectId(lectureId) ? new mongoose.Types.ObjectId(lectureId) : lectureId;
+    const logs = await Attendance.find({ lecture: queryId as any }).sort({ joinTime: 1 }).lean();
+
+    console.log(`[LECTURE-REPORT] Found ${logs.length} attendance logs for lecture ${lectureId}`);
+
+    // Group by user to show total duration
+    const summaryMap: Record<string, any> = {};
+    logs.forEach(log => {
+      const key = log.user.toString();
+      if (!summaryMap[key]) {
+        summaryMap[key] = {
+          userId: log.user,
+          userName: log.userName,
+          userRole: log.userRole,
+          totalDuration: 0,
+          sessions: []
+        };
+      }
+      summaryMap[key].totalDuration += log.duration || 0;
+      summaryMap[key].sessions.push({
+        join: log.joinTime,
+        leave: log.leaveTime,
+        duration: log.duration
+      });
+    });
+
+    return {
+      lecture: {
+        title: lecture.title,
+        status: lecture.status,
+        roomName: lecture.roomName
+      },
+      attendance: Object.values(summaryMap)
+    };
   }
 }
 

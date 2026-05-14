@@ -74,10 +74,22 @@ export const deleteLecture = async (req: Request, res: Response, next: NextFunct
   const teacherId = (req as any).user.id;
 
   try {
-    // Basic deletion logic remains simple but can be moved if needed
-    // For now, aligning with the orchestrator pattern
-    const lecture = await lectureService.completeLecture(lectureId as any, teacherId as any); 
-    res.json({ message: 'Lecture removed from active roster', lecture });
+    await lectureService.deleteLecture(lectureId as any, teacherId as any); 
+    res.json({ message: 'Lecture permanently deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const bulkDeleteLectures = async (req: Request, res: Response, next: NextFunction) => {
+  const { ids } = req.body;
+  const teacherId = (req as any).user.id;
+
+  try {
+    const results = await Promise.all(ids.map((id: string) => 
+      lectureService.deleteLecture(id, teacherId).catch(err => ({ id, error: err.message }))
+    ));
+    res.json({ message: 'Bulk delete operation completed', results });
   } catch (error) {
     next(error);
   }
@@ -89,6 +101,18 @@ export const kickStudent = async (req: Request, res: Response, next: NextFunctio
   try {
     const result = await lectureService.banUser(lectureId as any, studentId as any, teacherId as any);
     res.json({ message: 'Student kicked and banned successfully', result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getLectureReport = async (req: Request, res: Response, next: NextFunction) => {
+  const { lectureId } = req.params;
+  const teacherId = (req as any).user.id;
+
+  try {
+    const report = await lectureService.getLectureAttendance(lectureId as any, teacherId as any);
+    res.json(report);
   } catch (error) {
     next(error);
   }

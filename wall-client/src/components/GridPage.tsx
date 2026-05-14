@@ -26,6 +26,8 @@ export const GridPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [cursorVisible] = useState(true);
+  const [featuredStudent, setFeaturedStudent] = useState<string | undefined>(undefined);
+  const [featuredDestination, setFeaturedDestination] = useState<'wall' | 'dashboard' | 'none'>('none');
 
 
   const lectureId = searchParams.get('lecture') || '';
@@ -47,31 +49,51 @@ export const GridPage: React.FC = () => {
 
   useEffect(() => {
     if ((!lectureId && !roomParam) || !token) return;
+    
+    let isCancelled = false;
+    let activeRoom: Room | null = null;
+
     const connectToRoom = async () => {
       try {
         setIsConnecting(true);
-        // MISSION 13: Direct Room Binding
         const res = await axios.post(`${API_BASE}/lectures/${lectureId}/join?screen=${screenIndex}`, {
-          roomName: roomParam // Pass roomName explicitly if we have it
+          roomName: roomParam
         }, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        const newRoom = new Room({ adaptiveStream: true, dynacast: true });
+
+        if (isCancelled) return;
+
+        activeRoom = new Room({ adaptiveStream: true, dynacast: true });
         
-        // FIX: Enable autoSubscribe to ensure students appear
-        await newRoom.connect(res.data.serverUrl, res.data.token, { autoSubscribe: true });
+        await activeRoom.connect(res.data.serverUrl, res.data.token, { autoSubscribe: true });
         
-        setRoom(newRoom);
+        if (isCancelled) {
+          activeRoom.disconnect();
+          return;
+        }
+
+        setRoom(activeRoom);
         setIsConnecting(false);
       } catch (err: any) {
+        if (isCancelled) return;
         console.error('[GRID-PAGE] Connection Failure:', err);
         setError(err.response?.data?.message || 'Failed to connect');
         setIsConnecting(false);
       }
     };
+
     connectToRoom();
-    return () => { room?.disconnect(); };
-  }, [lectureId, roomParam, token]);
+
+    return () => { 
+      isCancelled = true;
+      if (activeRoom) {
+        activeRoom.disconnect();
+      } else if (room) {
+        room.disconnect();
+      }
+    };
+  }, [lectureId, roomParam, token, screenIndex]);
 
   const updateParticipants = useCallback(() => {
     if (!room) return;
@@ -94,6 +116,7 @@ export const GridPage: React.FC = () => {
     room.on(RoomEvent.ParticipantConnected, updateParticipants);
     room.on(RoomEvent.ParticipantDisconnected, updateParticipants);
     room.on(RoomEvent.TrackSubscribed, updateParticipants);
+    
     updateParticipants();
     return () => { room.removeAllListeners(); };
   }, [room, updateParticipants]);
@@ -124,6 +147,17 @@ export const GridPage: React.FC = () => {
     });
 
     socket.on('session_ended', () => setSessionEnded(true));
+    
+    socket.on('sync_room_state', (state: any) => {
+      if (state.featuredStudent) setFeaturedStudent(state.featuredStudent);
+      if (state.featuredDestination) setFeaturedDestination(state.featuredDestination);
+    });
+
+    socket.on('room:featured_update', ({ studentIdentity, destination }: { studentIdentity: string, destination: any }) => {
+      console.log('[GRID-ORCHESTRATION] Featured Student Update:', studentIdentity, destination);
+      setFeaturedStudent(studentIdentity);
+      setFeaturedDestination(destination);
+    });
 
     const heartbeatInterval = setInterval(() => {
       if (!socket.connected) {
@@ -170,6 +204,9 @@ export const GridPage: React.FC = () => {
   if (error) return <div style={errorStyle}>SCREEN {screenIndex + 1}: {error}</div>;
   if (isConnecting) return <div style={loadingStyle}>CONNECTING SCREEN {screenIndex + 1}...</div>;
 
+  const featuredList = featuredStudent ? featuredStudent.split(',').filter(Boolean) : [];
+  const featuredParticipants = participants.filter(p => featuredList.includes(p.identity));
+  const isFeaturedOnWall = featuredDestination === 'wall' && featuredParticipants.length > 0;
   const { cols } = getLayout();
 
   return (
@@ -178,37 +215,78 @@ export const GridPage: React.FC = () => {
       {/* CINEMATIC INDICATOR */}
       <div style={indicatorStyle}>
         <div style={glowDot}></div>
-        <span style={screenLabelStyle}>MONITOR {screenIndex + 1}</span>
+        <span style={screenLabelStyle}>{isFeaturedOnWall ? 'FEATURED FOCUS' : `MONITOR ${screenIndex + 1}`}</span>
         <div style={dividerStyle}></div>
         <Users size={14} color="#6366f1" />
-        <span style={countStyle}>{participants.length}</span>
+        <span style={countStyle}>{isFeaturedOnWall ? featuredParticipants.length : participants.length}</span>
       </div>
 
-      {/* DYNAMIC CINEMA GRID */}
+      {/* DYNAMIC CINEMA GRID / FEATURED VIEW */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${cols}, 1fr)`,
-        gap: '15px',
         width: '100%',
         height: '100%',
-        padding: '60px 20px 20px'
+        padding: isFeaturedOnWall ? '20px' : '60px 20px 20px',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        background: '#000'
       }}>
-        {participants.map(p => (
-          <div key={p.identity} style={tileStyle}>
-            <VideoTrack participant={p} room={room!} mode="grid" />
-            <div style={labelWrapperStyle}>
-              <span style={labelStyle}>{p.name || p.identity.split('_')[0]}</span>
-            </div>
+        {isFeaturedOnWall ? (
+          <div style={{ 
+            width: '100%', height: '100%', position: 'relative', animation: 'focusIn 0.8s cubic-bezier(0.22, 1, 0.36, 1)',
+            display: 'grid', gridTemplateColumns: `repeat(${Math.ceil(Math.sqrt(featuredParticipants.length))}, 1fr)`, gap: '20px'
+          }}>
+            {featuredParticipants.map(fp => (
+              <div key={fp.identity} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', borderRadius: '24px', border: '2px solid rgba(99, 102, 241, 0.5)', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+                <VideoTrack participant={fp} room={room!} mode="grid" />
+                <div style={{
+                  position: 'absolute', bottom: '40px', left: '40px',
+                  background: 'rgba(15, 23, 42, 0.85)', padding: '15px 30px', borderRadius: '20px',
+                  backdropFilter: 'blur(30px)', border: '1px solid rgba(255,255,255,0.2)',
+                  zIndex: 100
+                }}>
+                  <span style={{ color: '#fff', fontSize: '24px', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase' }}>
+                    {fp.name || fp.identity.split('_')[0]}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {/* AMBIENT GLOW */}
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, boxShadow: 'inset 0 0 150px rgba(99, 102, 241, 0.2)', pointerEvents: 'none' }} />
           </div>
-        ))}
+        ) : (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gap: '15px',
+            width: '100%',
+            height: '100%',
+          }}>
+            {participants.filter(p => !(featuredDestination === 'dashboard' && featuredList.includes(p.identity))).map(p => (
+              <div key={p.identity} style={tileStyle}>
+                <VideoTrack participant={p} room={room!} mode="grid" />
+                <div style={labelWrapperStyle}>
+                  <span style={labelStyle}>{p.name || p.identity.split('_')[0]}</span>
+                </div>
+              </div>
+            ))}
 
-        {participants.length === 0 && (
-          <div style={emptyStateStyle}>
-             <LayoutGrid size={80} color="rgba(99, 102, 241, 0.1)" />
-             <p style={{ color: 'rgba(255,255,255,0.2)', fontWeight: '900', letterSpacing: '4px' }}>AWAITING ASSIGNMENT</p>
+            {participants.length === 0 && (
+              <div style={emptyStateStyle}>
+                <LayoutGrid size={80} color="rgba(99, 102, 241, 0.1)" />
+                <p style={{ color: 'rgba(255,255,255,0.2)', fontWeight: '900', letterSpacing: '4px' }}>AWAITING ASSIGNMENT</p>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      <style>{`
+        @keyframes focusIn {
+          from { opacity: 0; transform: scale(1.1); filter: blur(20px); }
+          to { opacity: 1; transform: scale(1); filter: blur(0); }
+        }
+      `}</style>
 
       {sessionEnded && <div style={teardownOverlayStyle}><h1>SESSION COMPLETED</h1><p>Source Disconnected.</p></div>}
     </div>

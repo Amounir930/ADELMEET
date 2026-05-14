@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Room, RemoteParticipant, VideoQuality, RoomEvent, Track } from 'livekit-client';
 import { VideoTrack } from './VideoTrack';
 import { StudentChat } from './StudentChat';
-import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand, Maximize2, Minimize2, MessageSquare } from 'lucide-react';
+import { StudentWhiteboard } from './StudentWhiteboard';
+import { Mic, MicOff, Video, VideoOff, Loader2, LogOut, Gauge, Circle, StopCircle, Pause, Play, Hand, Maximize2, Minimize2, MessageSquare, MessageSquareOff, MonitorUp, ShieldAlert, MonitorOff } from 'lucide-react';
 import { useLocalRecorder } from '../hooks/useLocalRecorder';
 import { useLiveKit } from '../contexts/LiveKitContext';
 import { useStudentModeration } from '../hooks/useStudentModeration';
@@ -14,7 +15,7 @@ interface StudentCinemaProps {
 }
 
 export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onDisconnect }) => {
-  const { socket, isRecordingAllowed } = useLiveKit();
+  const { socket, isRecordingAllowed, isScreenShareAllowed, isChatEnabled, disconnect } = useLiveKit();
   const [teacher, setTeacher] = useState<RemoteParticipant | null>(null);
   const [isMicEnabled, setIsMicEnabled] = useState(false);
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
@@ -22,11 +23,66 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [currentQuality, setCurrentQuality] = useState<VideoQuality>(VideoQuality.HIGH);
+  const [isWhiteboardActive, setIsWhiteboardActive] = useState(false);
   const [micRequest, setMicRequest] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [hasNewPrivate, setHasNewPrivate] = useState(false);
-  const { isRecording, isPaused, duration, startRecording, stopRecording, pauseRecording, resumeRecording } = useLocalRecorder(room);
+
+  // --- SOVEREIGN VIRTUAL MIXER REFS ---
+  const mixerCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mixerStreamRef = useRef<MediaStream | null>(null);
+
+  const isWhiteboardActiveRef = useRef(isWhiteboardActive);
+  useEffect(() => {
+    isWhiteboardActiveRef.current = isWhiteboardActive;
+  }, [isWhiteboardActive]);
+
+  useEffect(() => {
+    // Create hidden mixer canvas ONCE. Never destroy it.
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280;
+    canvas.height = 720;
+    mixerCanvasRef.current = canvas;
+    // @ts-ignore
+    mixerStreamRef.current = canvas.captureStream(30);
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let animationId: number;
+    const render = () => {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      try {
+        if (isWhiteboardActiveRef.current) {
+          // Draw Whiteboard
+          const wbCanvas = document.querySelector('canvas[data-whiteboard="true"]') as HTMLCanvasElement;
+          if (wbCanvas) {
+             ctx.drawImage(wbCanvas, 0, 0, canvas.width, canvas.height);
+          }
+        } else {
+          // Draw Teacher's Camera
+          const videoElement = document.querySelector('video[data-main-video="true"]') as HTMLVideoElement;
+          if (videoElement && videoElement.readyState >= 2) {
+             ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+          }
+        }
+      } catch (err) {
+        // Silently catch cross-origin taint errors to prevent loop crash!
+      }
+      animationId = requestAnimationFrame(render);
+    };
+    render();
+    
+    return () => cancelAnimationFrame(animationId);
+  }, []); // EMPTY ARRAY: Stream is permanent!
+
+  const { isRecording, isPaused, duration, startRecording, stopRecording, pauseRecording, resumeRecording } = useLocalRecorder(room, mixerStreamRef.current);
   const [participantCount, setParticipantCount] = useState(room.remoteParticipants.size + 1);
+  const [isIndividualScreenShareAllowed, setIsIndividualScreenShareAllowed] = useState(true);
+  const [isStudentScreenSharing, setIsStudentScreenSharing] = useState(false);
+  const [isTeacherScreenSharing, setIsTeacherScreenSharing] = useState(false);
   
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -42,20 +98,48 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   };
 
   useEffect(() => {
-    if (!room || !socket || !room.localParticipant) return;
-    socket.emit('join_room', { roomName: room.name, identity: room.localParticipant.identity, role: 'student' });
+    if (!socket) return;
 
     // MISSION 13: SOVEREIGN ENFORCEMENT - Auto-kick on session end
     socket.on('session_ended', () => {
       console.log('[STUDENT-CINEMA] Sovereign Command: Session Ended by Teacher');
-      showToast('The teacher has ended this session. Redirecting...', 'success');
-      setTimeout(() => onDisconnect(), 2000);
+      showToast('انتهت المحاضرة. شكراً لحضورك.', 'success');
+      disconnect();
+      setTimeout(() => onDisconnect(), 2500);
     });
 
     return () => {
       socket.off('session_ended');
     };
-  }, [room.name, socket]);
+  }, [socket, disconnect, onDisconnect]);
+
+  useEffect(() => {
+    // MISSION 12: ORCHESTRATION - Notify engine about student presence
+    if (lecture?.roomName && room.localParticipant.identity) {
+      console.log(`[STUDENT-ORCHESTRATOR] Announcing presence in ${lecture.roomName}`);
+      if (socket) {
+        socket.emit('student:joined', { 
+          roomName: lecture.roomName, 
+          identity: room.localParticipant.identity 
+        });
+      }
+    }
+
+    return () => {
+      // MISSION 12: Notify exit
+      if (lecture?.roomName && room.localParticipant.identity && socket) {
+        socket.emit('student:left', { 
+          roomName: lecture.roomName, 
+          identity: room.localParticipant.identity 
+        });
+      }
+    };
+  }, [socket, lecture, room]);
+
+
+
+
+
 
   useEffect(() => {
     if (!isRecordingAllowed && isRecording) {
@@ -65,13 +149,30 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
   }, [isRecordingAllowed, isRecording, stopRecording]);
 
   useEffect(() => {
+    if (!isScreenShareAllowed && isStudentScreenSharing) {
+      room.localParticipant.setScreenShareEnabled(false);
+      setIsStudentScreenSharing(false);
+      showToast('Teacher locked screensharing for everyone.', 'error');
+    }
+  }, [isScreenShareAllowed, isStudentScreenSharing, room]);
+
+
+  useEffect(() => {
     if (!room) return;
     
     const discover = () => {
       const participants = Array.from(room.remoteParticipants.values());
-      const teacherPart = participants.find(p => p.identity.toLowerCase().includes('teacher') || p.identity.endsWith('_teacher'));
+      const teacherPart = participants.find(p => {
+        try {
+          const meta = p.metadata ? JSON.parse(p.metadata) : {};
+          return meta.role === 'teacher';
+        } catch (e) {
+          return p.identity.toLowerCase().includes('teacher') || p.identity.endsWith('_teacher');
+        }
+      });
       if (teacherPart?.identity !== teacher?.identity) setTeacher(teacherPart || null);
     };
+
 
     const onParticipantDisconnected = (p: RemoteParticipant) => {
       if (p.identity === teacher?.identity) {
@@ -100,7 +201,18 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       const activeSpeakers = new Set(room.activeSpeakers.map(s => s.identity));
       
       room.remoteParticipants.forEach((p) => {
-        const isTeacher = p.identity.toLowerCase().includes('teacher') || p.identity.endsWith('_teacher');
+        let isTeacher = false;
+        let isWall = false;
+
+        try {
+          const meta = p.metadata ? JSON.parse(p.metadata) : {};
+          isTeacher = meta.role === 'teacher';
+          isWall = meta.role === 'wall_display';
+        } catch (e) {
+          isTeacher = p.identity.toLowerCase().includes('teacher') || p.identity.endsWith('_teacher');
+          isWall = p.identity.startsWith('wall_');
+        }
+
         const isActiveSpeaker = activeSpeakers.has(p.identity);
 
         p.trackPublications.forEach((pub) => {
@@ -115,14 +227,20 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
             return;
           }
 
-          // RULE 2: Dynamic Q&A - Subscribe to Audio of active speakers (students)
+          // RULE 2: Wall Displays — Spectators should never publish, but we ignore them entirely just in case
+          if (isWall) {
+             if (pub.isSubscribed) pub.setSubscribed(false);
+             return;
+          }
+
+          // RULE 3: Dynamic Q&A - Subscribe to Audio of active speakers (students)
           if (pub.kind === Track.Kind.Audio && isActiveSpeaker) {
             if (!pub.isSubscribed) {
               console.log(`[STUDENT-SYNC] Subscribing to Active Speaker Audio: ${p.identity}`);
               pub.setSubscribed(true);
             }
           } 
-          // RULE 3: Unsubscribe from everyone else to save bandwidth
+          // RULE 4: Unsubscribe from everyone else to save bandwidth
           else {
             if (pub.isSubscribed) {
               console.log(`[STUDENT-SYNC] Unsubscribing from Background Track: ${p.identity} (${pub.kind})`);
@@ -133,9 +251,19 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       });
     };
 
+
     // EVENTS FOR PARTICIPANT COUNT SYNC
     const updateCount = () => {
-      setParticipantCount(room.remoteParticipants.size + 1);
+      // Engineering Solution: Only count students in the "Online" count
+      const studentsOnly = Array.from(room.remoteParticipants.values()).filter(p => {
+        try {
+          const meta = p.metadata ? JSON.parse(p.metadata) : {};
+          return meta.role === 'student';
+        } catch (e) {
+          return p.identity.includes('student') && !p.identity.includes('teacher') && !p.identity.startsWith('wall_');
+        }
+      });
+      setParticipantCount(studentsOnly.length + 1); // +1 for self
     };
 
     room.on(RoomEvent.ParticipantConnected, updateCount);
@@ -157,6 +285,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       room.off(RoomEvent.ActiveSpeakersChanged, manageSubscriptions);
     };
   }, [room, currentQuality]);
+
 
 
   const resetControlsTimer = useCallback(() => {
@@ -203,11 +332,36 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
       }
     });
 
+    // SCREEN SHARE PERMISSION EVENTS
+    socket.on('teacher:grant_screenshare', (data: any) => {
+      if (data.studentIdentity === room.localParticipant.identity) {
+        console.log('[STUDENT-CINEMA] Teacher granted screen share permission.');
+        setIsIndividualScreenShareAllowed(true);
+        showToast('Teacher allowed you to share your screen!', 'success');
+        resetControlsTimer();
+      }
+    });
+
+    socket.on('teacher:revoke_screenshare', (data: any) => {
+      if (data.studentIdentity === room.localParticipant.identity) {
+        console.log('[STUDENT-CINEMA] Teacher revoked screen share permission.');
+        setIsIndividualScreenShareAllowed(false);
+        // Stop sharing if currently sharing
+        if (isStudentScreenSharing) {
+          room.localParticipant.setScreenShareEnabled(false).catch(() => {});
+          setIsStudentScreenSharing(false);
+        }
+        showToast('Teacher removed your screen share permission.', 'error');
+      }
+    });
+
     return () => {
       socket.off('request_unmute');
       socket.off('teacher:lower_hand');
+      socket.off('teacher:grant_screenshare');
+      socket.off('teacher:revoke_screenshare');
     };
-  }, [socket, room.localParticipant.identity]);
+  }, [socket, room.localParticipant.identity, isStudentScreenSharing]);
 
   const handleApproveMic = async () => {
     try {
@@ -287,6 +441,26 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
     console.log(`[STUDENT-CINEMA] Subscriber Quality Set to: ${nextQ}`);
   };
 
+  const canShareScreen = isScreenShareAllowed && isIndividualScreenShareAllowed;
+
+  const toggleStudentScreenShare = async () => {
+    if (!canShareScreen) {
+      showToast('Screen sharing requires teacher permission.', 'error');
+      return;
+    }
+    try {
+      const newState = !isStudentScreenSharing;
+      await room.localParticipant.setScreenShareEnabled(newState);
+      setIsStudentScreenSharing(newState);
+      if (newState) showToast('You are now sharing your screen.', 'success');
+      else showToast('Screen sharing stopped.', 'success');
+    } catch (e) {
+      console.error('[STUDENT-CINEMA] Screen share failed:', e);
+      setIsStudentScreenSharing(false);
+      showToast('Failed to share screen. Did you cancel the selection?', 'error');
+    }
+  };
+
   if (!room) return null;
 
   return (
@@ -319,7 +493,16 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
           }}>
             {teacher ? (
               <>
-                <VideoTrack participant={teacher} mode="main" isFullscreen={isFullscreen} onFullscreenToggle={toggleFullscreen} visible={showControls} />
+                <div style={{ display: isWhiteboardActive ? 'none' : 'block', width: '100%', height: '100%' }}>
+                  <VideoTrack participant={teacher} mode="main" isFullscreen={isFullscreen} onFullscreenToggle={toggleFullscreen} visible={showControls} />
+                </div>
+                
+                <StudentWhiteboard 
+                  socket={socket}
+                  roomName={room.name}
+                  isInline={true}
+                  onVisibilityChange={setIsWhiteboardActive}
+                />
                 
                 {/* PREMIUM HUD: TOP BAR */}
                 <div style={{ 
@@ -436,7 +619,7 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                   <button 
                     onClick={() => {
                       if (!isRecordingAllowed && !isRecording) {
-                        showToast('Teacher has not enabled recording for students yet.', 'error');
+                        showToast('Teacher has disabled recording for this session.', 'error');
                         return;
                       }
                       isRecording ? stopRecording() : startRecording();
@@ -445,9 +628,9 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                       width: '52px',
                       height: '52px',
                       borderRadius: '18px',
-                      border: isRecording ? '2px solid #ef4444' : (isRecordingAllowed ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.05)'),
-                      background: isRecording ? 'rgba(239, 68, 68, 0.1)' : (isRecordingAllowed ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)'),
-                      color: isRecording ? '#ef4444' : (isRecordingAllowed ? '#fff' : '#4b5563'),
+                      border: isRecording ? '2px solid #ef4444' : (isRecordingAllowed ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(239, 68, 68, 0.3)'),
+                      background: isRecording ? 'rgba(239, 68, 68, 0.1)' : (isRecordingAllowed ? 'rgba(255,255,255,0.05)' : 'rgba(239, 68, 68, 0.1)'),
+                      color: isRecording ? '#ef4444' : (isRecordingAllowed ? '#fff' : '#ef4444'),
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -455,9 +638,9 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                       transition: 'all 0.3s ease',
                       opacity: (isRecordingAllowed || isRecording) ? 1 : 0.6
                     }}
-                    title={isRecordingAllowed ? (isRecording ? 'Stop Recording' : 'Start Local Recording') : 'Recording Disabled by Teacher'}
+                    title={isRecordingAllowed ? (isRecording ? 'Stop Recording' : 'Start Local Recording') : 'Recording Blocked by Teacher'}
                   >
-                    {isRecording ? <StopCircle size={24} className="animate-pulse" /> : <Circle size={24} />}
+                    {isRecording ? <StopCircle size={24} className="animate-pulse" /> : (isRecordingAllowed ? <Circle size={24} /> : <ShieldAlert size={24} />)}
                     {isRecording && <span style={{ fontSize: '10px', fontWeight: 'bold', marginLeft: '5px' }}>{formatDuration(duration)}</span>}
                   </button>
 
@@ -512,6 +695,25 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
                   <Hand size={24} className={isHandRaised ? 'animate-bounce' : ''} />
                 </button>
 
+                {/* SCREEN SHARE BUTTON (respects global & individual permission) */}
+                <button 
+                  onClick={toggleStudentScreenShare}
+                  style={{ 
+                    width: '52px', height: '52px', borderRadius: '18px', 
+                    background: isStudentScreenSharing ? 'rgba(34, 197, 94, 0.3)' : (canShareScreen ? 'rgba(255,255,255,0.07)' : 'rgba(239, 68, 68, 0.1)'), 
+                    color: isStudentScreenSharing ? '#22c55e' : (canShareScreen ? '#fff' : '#ef4444'), 
+                    border: isStudentScreenSharing ? '2px solid #22c55e' : (canShareScreen ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(239, 68, 68, 0.3)'), 
+                    cursor: canShareScreen ? 'pointer' : 'not-allowed', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    animation: isStudentScreenSharing ? 'glow-pulse-success 2s infinite' : 'none',
+                    transition: 'all 0.3s ease',
+                    opacity: canShareScreen ? 1 : 0.6
+                  }}
+                  title={!canShareScreen ? 'Screen share not permitted by teacher' : (isStudentScreenSharing ? 'Stop Screen Share' : 'Share Your Screen')}
+                >
+                  {canShareScreen ? <MonitorUp size={24} /> : <MonitorOff size={24} />}
+                </button>
+
                 <button 
                   onClick={toggleFullscreen}
                   style={{ 
@@ -529,23 +731,29 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
 
                 <button 
                   onClick={() => {
+                    if (!isChatEnabled && !isChatOpen) {
+                      showToast('Chat is currently disabled by teacher.', 'error');
+                      return;
+                    }
                     setIsChatOpen(!isChatOpen);
                     setHasNewPrivate(false);
                   }}
                   className={hasNewPrivate ? 'pulse-alert' : ''}
                   style={{ 
                     width: '52px', height: '52px', borderRadius: '18px', 
-                    background: isChatOpen ? 'rgba(99, 102, 241, 0.3)' : (hasNewPrivate ? 'rgba(168, 85, 247, 0.4)' : 'rgba(255,255,255,0.05)'), 
-                    color: hasNewPrivate ? '#a855f7' : '#fff', 
-                    border: hasNewPrivate ? '2px solid #a855f7' : '1px solid rgba(255,255,255,0.1)', 
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: isChatOpen ? 'rgba(99, 102, 241, 0.3)' : (hasNewPrivate ? 'rgba(168, 85, 247, 0.4)' : (isChatEnabled ? 'rgba(255,255,255,0.05)' : 'rgba(239, 68, 68, 0.1)')), 
+                    color: hasNewPrivate ? '#a855f7' : (isChatEnabled ? '#fff' : '#ef4444'), 
+                    border: hasNewPrivate ? '2px solid #a855f7' : (isChatEnabled ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(239, 68, 68, 0.3)'), 
+                    cursor: isChatEnabled ? 'pointer' : 'not-allowed', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
                     transition: 'all 0.3s ease',
                     position: 'relative',
-                    boxShadow: hasNewPrivate ? '0 0 20px rgba(168, 85, 247, 0.5)' : 'none'
+                    boxShadow: hasNewPrivate ? '0 0 20px rgba(168, 85, 247, 0.5)' : 'none',
+                    opacity: isChatEnabled ? 1 : 0.6
                   }}
-                  title="Toggle Chat"
+                  title={isChatEnabled ? "Toggle Chat" : "Chat Disabled"}
                 >
-                  <MessageSquare size={24} />
+                  {isChatEnabled ? <MessageSquare size={24} /> : <MessageSquareOff size={24} />}
                   {hasNewPrivate && (
                     <div style={{
                       position: 'absolute', top: '-5px', right: '-5px',
@@ -659,10 +867,13 @@ export const StudentCinema: React.FC<StudentCinemaProps> = ({ room, lecture, onD
         </div>
       )}
 
+      {/* Whiteboard logic is now handled inline within the cinema area */}
+
       <StudentChat 
         socket={socket} 
         room={room} 
         isOpen={isChatOpen} 
+        isChatEnabled={isChatEnabled}
         onClose={() => setIsChatOpen(false)} 
         onNewPrivate={() => {
           setHasNewPrivate(true);

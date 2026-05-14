@@ -52,13 +52,15 @@ Based on the existing Node.js, Socket.io, LiveKit SFU, and Next.js setup:
 *   ✅ **Responsive Controls:** Controls adapt to screen size and device type.
 *   ✅ **Smart Wake-Up System:** Auto-trigger UI visibility on critical events.
 
+*   ✅ **Network Health Indicators:** Live signal bars implemented for real-time monitoring.
+*   ✅ **Lock Room:** Dynamic room entry lock fully functional.
+*   ✅ **Teacher Self-View (Floating):** Draggable and resizable cockpit monitor.
+*   ✅ **Interactive Whiteboard:** Sovereign drawing system with real-time sync.
+
 ### ❌ Missing (To Be Implemented)
-*   ❌ **Pause Session:** No logic to suspend media streams temporarily.
-*   ❌ **Spotlight / Focus Mode:** Missing logic to enlarge a specific student.
+*   ❌ **Pause Session:** Full session suspension logic (media + UI overlay).
 *   ❌ **Live Polls & Quizzes:** Not implemented.
-*   ❌ **Screen Share (Teacher):** Integrated via LiveKit but needs explicit UI trigger optimization.
-*   ❌ **Network Health Indicators:** Missing visual representation of connection stats.
-*   ❌ **Lock Room:** No feature to prevent late entries dynamically.
+*   ❌ **Auto-Attendance:** Not implemented.
 
 ---
 
@@ -93,11 +95,11 @@ Based on the existing Node.js, Socket.io, LiveKit SFU, and Next.js setup:
 *   **Broadcast:** Emits `room:hand_queue_update` with the ordered list to the Teacher Dashboard.
 *   **Action (Teacher):** Acknowledges the student, emitting `teacher:lower_hand`. Backend removes the ID from Redis and broadcasts the updated queue.
 
-### 2. Spotlight / Focus Mode (LiveKit & React State)
-*   **Approach:** Manage a `spotlightedStudentId` state in the Central Orchestrator/Redis.
-*   **Action (Teacher):** Clicks "Spotlight" on a student tile. Emits `teacher:spotlight(studentId)`.
-*   **Backend:** Updates room state in Redis and broadcasts `room:spotlight_active(studentId)`.
-*   **Action (Display Clients):** The Teacher PC renders that student's `VideoTrack` in a large main container. The Grid PCs (Mini PCs) can optionally apply a visual border or keep their grid layout. LiveKit's `TrackSubscribed` event ensures the Teacher PC requests the `HIGH` quality layer for the spotlighted student via `pub.setVideoQuality(VideoQuality.HIGH)`.
+### 2. Spotlight / Focus Mode (Orchestration & Multi-Select)
+*   **Approach:** Local state managed by Teacher Dashboard, emitting commands to external screens via Socket.io.
+*   **Action (Teacher):** Clicks "Spotlight" (Wall or Dashboard) on one or multiple student tiles.
+*   **Multi-Select:** Emits `teacher:feature_student` with a comma-separated list of IDs to bypass backend limitations.
+*   **Action (Display Clients):** The Teacher Dashboard and External Wall dynamically calculate grid columns based on the number of featured students. Unselected students are hidden from the target destination.
 
 ### 3. Pause Session (LiveKit Tracks)
 *   **Approach:** Instead of disconnecting Socket.io or WebRTC, manipulate the media tracks directly to save bandwidth and instantly pause.
@@ -115,6 +117,7 @@ Based on the existing Node.js, Socket.io, LiveKit SFU, and Next.js setup:
 | اسم الإضافة | توضيح | نسبة التنفيذ |
 | :--- | :--- | :--- |
 | **الدخول والخروج الأساسي** | نظام الانضمام للغرفة وتوليد التوكينز | 100% |
+| **الاستقرار المعماري (Stability)** | حل مشاكل WebRTC Race Conditions وثبات الاتصال | 100% |
 | **كتم/إلغاء كتم الجميع** | التحكم الجماعي في ميكروفونات الطلاب من المعلم | 100% |
 | **التحكم الفردي (Mute/Kick)** | كتم صوت طالب معين أو طرده من الجلسة | 100% |
 | **عرض الشبكة (Grid View)** | توزيع تلقائي للمشاركين على الشاشات الكبيرة | 100% |
@@ -125,12 +128,44 @@ Based on the existing Node.js, Socket.io, LiveKit SFU, and Next.js setup:
 | **اكتشاف التحدث (VAD)** | تمييز بصري للطالب الذي يتحدث حالياً | 100% |
 | **الاستيقاظ الذكي (Wake-Up)** | ظهور القوائم تلقائياً عند حدوث تفاعل أو طوارئ | 100% |
 | **التنسيق المستجيب (Responsive)** | تكييف حجم القوائم مع مقاس الشاشة والجهاز | 100% |
-| **وضع التركيز (Spotlight)** | تكبير فيديو طالب معين على الشاشة الرئيسية | 0% |
-| **مشاركة الشاشة (المعلم)** | عرض شاشة المعلم أو العرض التقديمي للطلاب | 50% |
-| **مؤشرات صحة الشبكة** | عرض جودة اتصال كل طالب (Signal Bars) | 0% |
-| **قفل الغرفة** | منع دخول طلاب جدد بعد بدء المحاضرة | 0% |
-| **السبورة التفاعلية** | لوحة رسم مشتركة للشرح التوضيحي | 0% |
+| **وضع التركيز (Spotlight & Multi-Select)** | توجيه طالب أو أكثر لشاشة المعلم أو الشاشة الخارجية | 100% |
+| **مشاركة الشاشة (المعلم)** | عرض شاشة المعلم أو العرض التقديمي للطلاب | 100% |
+| **السبورة التفاعلية (Whiteboard)** | لوحة رسم سيادية للمعلم مع بث لحظي للطلاب | 90% |
+| **مؤشرات صحة الشبكة** | عرض جودة اتصال المعلم والطلاب (Signal Bars) | 100% |
+| **قفل الغرفة** | منع دخول طلاب جدد بعد بدء المحاضرة | 100% |
 | **الحضور التلقائي** | تتبع وقت دخول وخروج كل طالب آلياً | 0% |
-| **تعليق الجلسة (Pause)** | إيقاف البث مؤقتاً دون قطع الاتصال | 0% |
+| **تعليق الجلسة (Pause)** | إيقاف البث مؤقتاً دون قطع الاتصال | 50% |
 | **الاستطلاعات الحية (Polls)** | إنشاء تصويت سريع للطلاب أثناء المحاضرة | 0% |
+
+---
+
+## 6. Detailed Implementation: Sovereign Whiteboard (Phase 1)
+
+The Sovereign Whiteboard is a high-performance, low-latency drawing canvas designed for the teacher to deliver visual explanations. Unlike standard screen sharing, it transmits vector drawing data (coordinates and paths) via Socket.io, ensuring crisp quality even on low bandwidth.
+
+### Step 1: Teacher Canvas Engine (The Creator)
+*   **Technology:** HTML5 Canvas API + `react-konva` or standard Canvas context.
+*   **Tools:**
+    *   **Pen Tool:** Smooth Bezier curves for handwriting.
+    *   **Eraser:** Path-based erasing.
+    *   **Shapes:** Lines, Circles, Rectangles.
+    *   **Backgrounds:** Ability to "Slide" a PDF page or Image behind the drawing layer.
+    *   **Clear All:** Instant canvas wipe.
+*   **Sync:** Every `mousedown`, `mousemove`, and `mouseup` event calculates relative coordinates (0 to 1) to ensure consistent rendering across different student screen sizes.
+
+### Step 2: Synchronization Layer (Socket.io)
+*   **Events:**
+    *   `whiteboard:draw_data`: Broadcasts `{ type, path, color, thickness, isLastPoint }`.
+    *   `whiteboard:clear`: Broadcasts a wipe command.
+    *   `whiteboard:request_state`: When a new student joins, they request the full current drawing history to rebuild the canvas.
+*   **Persistence:** Store current session paths in an in-memory buffer (or Redis) for late-joiners.
+
+### Step 3: Student Mirror (The Viewer)
+*   **Interface:** A read-only canvas module that slides into view when the teacher activates "Whiteboard Mode".
+*   **Rendering:** Listens for `whiteboard:draw_data` and executes drawing commands on a local hidden canvas, then paints to the UI.
+*   **Zero-Interference:** Students cannot draw or erase by default, preserving the teacher's "Sovereign" control.
+
+### Step 4: UI Integration
+*   **Teacher Dashboard:** A new toggle in the side Command Dock to launch the Whiteboard overlay.
+*   **HUD Integration:** Minimize/Maximize whiteboard while keeping student feeds visible in a sidebar or PiP mode.
 

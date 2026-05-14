@@ -228,17 +228,6 @@ export const DashboardChat: React.FC<DashboardChatProps> = ({
           <MessageCircle size={20} color="#6366f1" />
           <h2 style={{ color: '#fff', fontSize: '20px', fontWeight: '900', letterSpacing: '1px', margin: 0 }}>CHAT HUB</h2>
         </div>
-        <div 
-          style={{ 
-            background: isChatEnabled ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', 
-            border: `1px solid ${isChatEnabled ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
-            borderRadius: '10px', padding: '6px 12px', color: isChatEnabled ? '#10b981' : '#ef4444',
-            fontSize: '11px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px'
-          }}
-        >
-          {isChatEnabled ? <Unlock size={14} /> : <Lock size={14} />}
-          {isChatEnabled ? 'CHAT ACTIVE' : 'CHAT LOCKED'}
-        </div>
       </div>
 
       {/* TABS */}

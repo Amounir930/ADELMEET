@@ -8,43 +8,65 @@ import {
   Monitor, 
   Clock,
   Activity,
-  ChevronRight
+  ChevronRight,
+  ClipboardList,
+  ArrowLeft,
+  FileText,
+  Search,
+  Trash2,
+  CheckSquare,
+  Square
 } from 'lucide-react';
+import { ReportViewer } from './ReportViewer';
 
 const API_BASE = import.meta.env.VITE_API_URL_BASE || 'http://localhost:5000/api';
 
-export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) => void }> = ({ onJoin }) => {
+export const Dashboard: React.FC<{ onJoin: (lectureId: string, config: any) => void }> = ({ onJoin }) => {
   const { user, token, logout } = useAuth();
   const [lectures, setLectures] = useState<any[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState('');
-  const [scheduledAt, setScheduledAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'error' | 'success' } | null>(null);
   
-  // Launch screens states
+  // Launch config states
   const [launchingLecture, setLaunchingLecture] = useState<string | null>(null);
-  const [numScreens, setNumScreens] = useState(10);
+  const [hallNumber, setHallNumber] = useState('101');
+  const [allowChat, setAllowChat] = useState(true);
+  const [allowRecord, setAllowRecord] = useState(false);
+  const [allowScreenShare, setAllowScreenShare] = useState(false);
+  const [viewMode, setViewMode] = useState<'active' | 'reports'>('active');
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const showToast = (msg: string, type: 'error' | 'success' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const fetchLectures = async () => {
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const fetchLectures = async (isInitial = false) => {
+    if (document.hidden && !isInitial) return; 
     try {
       const res = await axios.get(`${API_BASE}/lectures`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setLectures(res.data);
+      if (Array.isArray(res.data)) {
+        setLectures(res.data);
+      }
     } catch (err) {
-      console.error('Failed to fetch lectures');
+      console.error('Failed to fetch lectures', err);
+    } finally {
+      setInitialLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchLectures();
-    const interval = setInterval(fetchLectures, 5000);
+    fetchLectures(true); // Force initial fetch
+    const interval = setInterval(() => fetchLectures(false), 10000);
     return () => clearInterval(interval);
   }, [token]);
 
@@ -52,11 +74,10 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post(`${API_BASE}/lectures`, { title, scheduledAt: scheduledAt || null }, {
+      await axios.post(`${API_BASE}/lectures`, { title, scheduledAt: null }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setTitle('');
-      setScheduledAt('');
       setShowCreate(false);
       fetchLectures();
       showToast('New Command Session created!', 'success');
@@ -69,18 +90,94 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
 
   const executeLaunch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (numScreens > 0) {
-      for (let i = 0; i < numScreens; i++) {
-        const url = `/grid?lecture=${launchingLecture}&totalScreens=${numScreens}&screen=${i}`;
-        const windowFeatures = `width=800,height=600,left=${i * 50},top=${i * 50}`;
-        window.open(url, `screen_${i}`, windowFeatures);
-      }
-    }
-
     if (launchingLecture) {
-      onJoin(launchingLecture, numScreens);
+      onJoin(launchingLecture, {
+        hallNumber,
+        chat: allowChat,
+        record: allowRecord,
+        share: allowScreenShare
+      });
     }
     setLaunchingLecture(null);
+  };
+
+  const fetchReport = async (lectureId: string) => {
+    setReportLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/lectures/${lectureId}/report`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setReportData(res.data);
+      setSelectedReport(lectureId);
+    } catch (err) {
+      showToast('Failed to fetch report', 'error');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this session?')) return;
+    
+    // OPTIMISTIC UI: Remove from list immediately
+    const originalLectures = [...lectures];
+    setLectures(prev => prev.filter(l => l._id !== id));
+    
+    try {
+      await axios.delete(`${API_BASE}/lectures/${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      showToast('Session deleted', 'success');
+    } catch (err) {
+      setLectures(originalLectures); // Rollback on error
+      showToast('Delete failed', 'error');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.length} selected sessions?`)) return;
+    
+    // OPTIMISTIC UI
+    const originalLectures = [...lectures];
+    const idsToRemove = [...selectedIds];
+    setLectures(prev => prev.filter(l => !idsToRemove.includes(l._id)));
+    setSelectedIds([]);
+
+    try {
+      await axios.post(`${API_BASE}/lectures/bulk-delete`, { ids: idsToRemove }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      showToast('Selected sessions deleted', 'success');
+    } catch (err) {
+      setLectures(originalLectures);
+      showToast('Bulk delete failed', 'error');
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const filteredLectures = (lectures || []).filter(l => 
+    (l.title || '').toLowerCase().includes((searchTerm || '').toLowerCase())
+  );
+
+  const activeFiltered = filteredLectures.filter(l => l.status !== 'completed');
+  const reportsFiltered = filteredLectures.filter(l => l.status === 'completed');
+
+  const handleSelectAll = () => {
+    const currentList = viewMode === 'active' ? activeFiltered : reportsFiltered;
+    if (selectedIds.length === currentList.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(currentList.map(l => l._id));
+    }
   };
 
   return (
@@ -90,9 +187,18 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
       color: '#fff', 
       fontFamily: 'Outfit, sans-serif',
       padding: '60px 40px',
-      overflowY: 'auto'
+      overflowY: 'auto',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
-      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+      {initialLoading && lectures.length === 0 && (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Activity className="animate-spin" size={40} color="#6366f1" />
+        </div>
+      )}
+      {!initialLoading && (
+        <>
+          <div style={{ maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
         
         {/* ADMINISTRATIVE HEADER */}
         <header style={{ 
@@ -140,49 +246,169 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
           
           {/* MAIN COLUMN: SESSION MANAGEMENT */}
           <main>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
-              <Activity color="#6366f1" size={24} />
-              <h2 style={{ fontSize: '22px', fontWeight: '800' }}>Active Command Logs</h2>
+            {/* TAB SWITCHER */}
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '30px' }}>
+              <button 
+                onClick={() => setViewMode('active')}
+                style={{ 
+                  background: 'transparent', border: 'none', borderBottom: viewMode === 'active' ? '3px solid #6366f1' : '3px solid transparent',
+                  color: viewMode === 'active' ? '#fff' : '#94a3b8', padding: '10px 20px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s'
+                }}
+              >
+                ACTIVE SESSIONS
+              </button>
+              <button 
+                onClick={() => setViewMode('reports')}
+                style={{ 
+                  background: 'transparent', border: 'none', borderBottom: viewMode === 'reports' ? '3px solid #6366f1' : '3px solid transparent',
+                  color: viewMode === 'reports' ? '#fff' : '#94a3b8', padding: '10px 20px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s'
+                }}
+              >
+                SESSION REPORTS
+              </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
-              {lectures.map((lecture) => (
-                <div key={lecture._id} className="glass" style={{ 
-                  padding: '25px', 
-                  borderRadius: '24px', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)',
-                  transition: 'all 0.3s ease'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-                    <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Monitor color="#6366f1" size={24} />
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 5px 0' }}>{lecture.title}</h3>
-                      <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#94a3b8' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> {new Date(lecture.scheduledAt).toLocaleTimeString()}</span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Users size={14} /> 0 Participants</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <button onClick={() => setLaunchingLecture(lecture.roomName)} style={{ background: '#6366f1', color: 'white', border: 'none', padding: '10px 25px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      LAUNCH <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {lectures.length === 0 && (
-                <div style={{ padding: '60px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: '24px', border: '1px dashed rgba(255,255,255,0.1)' }}>
-                  <p style={{ color: '#94a3b8' }}>No active command sessions found.</p>
-                </div>
+            {/* SEARCH & ACTIONS */}
+            <div style={{ display: 'flex', gap: '15px', marginBottom: '25px', alignItems: 'center' }}>
+              <div 
+                onClick={handleSelectAll}
+                style={{ 
+                  cursor: 'pointer', color: selectedIds.length > 0 ? '#6366f1' : '#475569', 
+                  display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 'bold' 
+                }}
+              >
+                {selectedIds.length > 0 && selectedIds.length === (viewMode === 'active' ? activeFiltered.length : reportsFiltered.length) 
+                  ? <CheckSquare size={22} /> : <Square size={22} />}
+                {selectedIds.length > 0 ? 'DESELECT ALL' : 'SELECT ALL'}
+              </div>
+
+              <div style={{ flex: 1, position: 'relative' }}>
+                <Search size={18} color="#94a3b8" style={{ position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)' }} />
+                <input 
+                  type="text" 
+                  placeholder={`Search ${viewMode === 'active' ? 'active' : 'archived'} sessions...`} 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ 
+                    width: '100%', padding: '12px 15px 12px 45px', borderRadius: '15px', 
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', 
+                    color: '#fff', outline: 'none' 
+                  }}
+                />
+              </div>
+              {selectedIds.length > 0 && (
+                <button 
+                  onClick={handleBulkDelete}
+                  style={{ 
+                    background: '#ef4444', color: '#fff', border: 'none', 
+                    padding: '12px 25px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer', 
+                    display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 10px 20px rgba(239, 68, 68, 0.2)'
+                  }}
+                >
+                  <Trash2 size={18} /> DELETE {selectedIds.length}
+                </button>
               )}
             </div>
+
+            {viewMode === 'active' ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
+                  <Activity color="#6366f1" size={24} />
+                  <h2 style={{ fontSize: '22px', fontWeight: '800' }}>Active Command Logs</h2>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
+                  {filteredLectures.filter(l => l.status !== 'completed').map((lecture) => (
+                    <div key={lecture._id} className="glass" style={{ 
+                      padding: '25px', 
+                      borderRadius: '24px', 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      background: selectedIds.includes(lecture._id) ? 'rgba(99, 102, 241, 0.05)' : 'rgba(255,255,255,0.02)',
+                      border: selectedIds.includes(lecture._id) ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(255,255,255,0.05)',
+                      transition: 'all 0.3s ease'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                        <div onClick={() => toggleSelect(lecture._id)} style={{ cursor: 'pointer', color: selectedIds.includes(lecture._id) ? '#6366f1' : '#475569' }}>
+                          {selectedIds.includes(lecture._id) ? <CheckSquare size={22} /> : <Square size={22} />}
+                        </div>
+                        <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Monitor color="#6366f1" size={24} />
+                        </div>
+                        <div>
+                          <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 5px 0' }}>{lecture.title}</h3>
+                          <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#94a3b8' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> {new Date(lecture.scheduledAt).toLocaleTimeString()}</span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Users size={14} /> 0 Participants</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button onClick={() => handleDelete(lecture._id)} style={{ padding: '10px', borderRadius: '12px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.5 }}>
+                          <Trash2 size={18} />
+                        </button>
+                        <button onClick={() => setLaunchingLecture(lecture.roomName)} style={{ background: '#6366f1', color: 'white', border: 'none', padding: '10px 25px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          LAUNCH <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {filteredLectures.filter(l => l.status !== 'completed').length === 0 && (
+                    <div style={{ padding: '60px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', borderRadius: '24px', border: '1px dashed rgba(255,255,255,0.1)' }}>
+                      <p style={{ color: '#94a3b8' }}>No matching active sessions found.</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' }}>
+                  <ClipboardList color="#6366f1" size={24} />
+                  <h2 style={{ fontSize: '22px', fontWeight: '800' }}>Archived Reports</h2>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '15px' }}>
+                  {filteredLectures.filter(l => l.status === 'completed').map((lecture) => (
+                    <div key={lecture._id} className="glass" style={{ 
+                      padding: '25px', 
+                      borderRadius: '24px', 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      background: selectedIds.includes(lecture._id) ? 'rgba(99, 102, 241, 0.05)' : 'rgba(255,255,255,0.02)',
+                      border: selectedIds.includes(lecture._id) ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(255,255,255,0.05)',
+                      transition: 'all 0.3s ease'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                        <div onClick={() => toggleSelect(lecture._id)} style={{ cursor: 'pointer', color: selectedIds.includes(lecture._id) ? '#6366f1' : '#475569' }}>
+                          {selectedIds.includes(lecture._id) ? <CheckSquare size={22} /> : <Square size={22} />}
+                        </div>
+                        <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'rgba(148, 163, 184, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <FileText color="#94a3b8" size={24} />
+                        </div>
+                        <div>
+                          <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 5px 0' }}>{lecture.title}</h3>
+                          <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#94a3b8' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Completed {new Date(lecture.updatedAt || lecture.scheduledAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button onClick={() => handleDelete(lecture._id)} style={{ padding: '10px', borderRadius: '12px', background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.5 }}>
+                          <Trash2 size={18} />
+                        </button>
+                        <button onClick={() => setSelectedReportId(lecture._id)} style={{ background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', padding: '10px 25px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          VIEW REPORT
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </main>
 
           {/* SIDEBAR: ADMIN ANALYTICS */}
@@ -229,12 +455,6 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
                 required 
                 style={{ padding: '15px 20px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none' }}
               />
-              <input 
-                type="datetime-local" 
-                value={scheduledAt} 
-                onChange={(e) => setScheduledAt(e.target.value)} 
-                style={{ padding: '15px 20px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none' }}
-              />
               <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
                 <button type="button" onClick={() => setShowCreate(false)} style={{ flex: 1, padding: '15px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>CANCEL</button>
                 <button type="submit" disabled={loading} style={{ flex: 1, padding: '15px', borderRadius: '15px', background: '#6366f1', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
@@ -246,32 +466,82 @@ export const Dashboard: React.FC<{ onJoin: (lectureId: string, screens: number) 
         </div>
       )}
 
-      {/* LAUNCH SESSION MODAL */}
+      {/* INITIALIZE CLASSROOM MODAL */}
       {launchingLecture && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="glass" style={{ width: '100%', maxWidth: '400px', padding: '40px', borderRadius: '32px' }}>
-            <h2 style={{ fontSize: '24px', fontWeight: '900', marginBottom: '20px' }}>LAUNCH SCREENS</h2>
-            <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '25px' }}>Enter the number of physical monitors/screens to open. The system will auto-balance students.</p>
+          <div className="glass" style={{ width: '100%', maxWidth: '450px', padding: '40px', borderRadius: '32px' }}>
+            <h2 style={{ fontSize: '24px', fontWeight: '900', marginBottom: '10px' }}>INITIALIZE CLASSROOM</h2>
+            <p style={{ color: '#94a3b8', fontSize: '14px', marginBottom: '25px' }}>Configure the room environment and target display hall before launching.</p>
+            
             <form onSubmit={executeLaunch} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <input 
-                type="number" 
-                placeholder="Number of Screens" 
-                value={numScreens} 
-                onChange={(e) => setNumScreens(parseInt(e.target.value) || 0)} 
-                required 
-                min="0"
-                max="50"
-                style={{ padding: '15px 20px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold' }}>TARGET HALL NUMBER</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. 101, 120" 
+                  value={hallNumber} 
+                  onChange={(e) => setHallNumber(e.target.value)} 
+                  required 
+                  style={{ padding: '15px 20px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <label style={{ fontSize: '12px', color: '#6366f1', fontWeight: 'bold' }}>PRESET PERMISSIONS</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                  <button 
+                    type="button"
+                    onClick={() => setAllowChat(!allowChat)}
+                    style={{ 
+                      padding: '12px', borderRadius: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '11px',
+                      background: allowChat ? '#10b981' : '#ef4444', color: '#fff', transition: 'all 0.3s'
+                    }}
+                  >
+                    CHAT: {allowChat ? 'ON' : 'OFF'}
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setAllowRecord(!allowRecord)}
+                    style={{ 
+                      padding: '12px', borderRadius: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '11px',
+                      background: allowRecord ? '#10b981' : '#ef4444', color: '#fff', transition: 'all 0.3s'
+                    }}
+                  >
+                    REC: {allowRecord ? 'ON' : 'OFF'}
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setAllowScreenShare(!allowScreenShare)}
+                    style={{ 
+                      padding: '12px', borderRadius: '12px', cursor: 'pointer', border: 'none', fontWeight: 'bold', fontSize: '11px',
+                      background: allowScreenShare ? '#10b981' : '#ef4444', color: '#fff', transition: 'all 0.3s'
+                    }}
+                  >
+                    SHARE: {allowScreenShare ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
                 <button type="button" onClick={() => setLaunchingLecture(null)} style={{ flex: 1, padding: '15px', borderRadius: '15px', background: 'rgba(255,255,255,0.05)', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>CANCEL</button>
-                <button type="submit" style={{ flex: 1, padding: '15px', borderRadius: '15px', background: '#10b981', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>
-                  CONFIRM & LAUNCH
+                <button type="submit" style={{ flex: 1, padding: '15px', borderRadius: '15px', background: '#6366f1', border: 'none', color: '#fff', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 10px 20px rgba(99, 102, 241, 0.3)' }}>
+                  LAUNCH CLASS
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* REPORT VIEWER MODAL */}
+      {selectedReportId && (
+        <ReportViewer 
+          lectureId={selectedReportId} 
+          token={token!} 
+          onClose={() => setSelectedReportId(null)} 
+        />
+      )}
+      </>
       )}
 
       {/* TOAST */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Room, Track, RemoteParticipant } from 'livekit-client';
-import { Mic, MicOff, Video, VideoOff, ShieldCheck, ShieldAlert, Search, ChevronLeft, ChevronRight, Hand, XSquare, PlusSquare, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, ShieldCheck, ShieldAlert, Search, ChevronLeft, ChevronRight, Hand, XSquare, PlusSquare, MessageSquare, LayoutGrid, Monitor, MonitorUp, Lock, LockOpen } from 'lucide-react';
 import { Socket } from 'socket.io-client';
 
 interface DashboardSidebarProps {
@@ -27,6 +27,12 @@ interface DashboardSidebarProps {
   studentUnreadCounts: Record<string, number>;
   hasHandAlert: boolean;
   hasScreenAlert: boolean;
+  featuredStudent?: string;
+  featuredDestination?: 'wall' | 'dashboard' | 'none';
+  isRoomLocked: boolean;
+  onToggleRoomLock: () => void;
+  screenShareAllowed: Set<string>;
+  onToggleScreenSharePermission: (identity: string) => void;
 }
 
 export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
@@ -52,7 +58,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
   isChatEnabled,
   studentUnreadCounts,
   hasHandAlert,
-  hasScreenAlert
+  hasScreenAlert,
+  featuredStudent,
+  featuredDestination,
+  isRoomLocked,
+  onToggleRoomLock,
+  screenShareAllowed,
+  onToggleScreenSharePermission
 }) => {
   const [muteStatus, setMuteStatus] = useState<'idle' | 'sending'>('idle');
   const [lockStatus, setLockStatus] = useState<'idle' | 'sending'>('idle');
@@ -80,90 +92,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
         </span>
       </div>
 
-      {/* MISSION 14: GLOBAL COMMAND HUB (NOW 2x2 GRID) */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(2, 1fr)', 
-        gap: '10px', 
-        marginBottom: '20px',
-        padding: '15px',
-        background: 'rgba(15, 23, 42, 0.4)',
-        borderRadius: '20px',
-        border: '1px solid rgba(255,255,255,0.05)'
-      }}>
-        <button 
-          onClick={() => {
-            setMuteStatus('sending');
-            onToggleMuteAll();
-            setTimeout(() => setMuteStatus('idle'), 2000);
-          }}
-          style={{ 
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-            background: muteStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.1)',
-            color: muteStatus === 'sending' ? '#10b981' : '#ef4444',
-            border: `1px solid ${muteStatus === 'sending' ? '#10b981' : 'rgba(239, 68, 68, 0.2)'}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
-          }}
-        >
-          <MicOff size={20} />
-          <span style={{ fontSize: '10px', fontWeight: '900' }}>{muteStatus === 'sending' ? 'SENT!' : 'MUTE ALL'}</span>
-        </button>
-
-        <button 
-          onClick={() => {
-            setLockStatus('sending');
-            onToggleLockAll();
-            setTimeout(() => setLockStatus('idle'), 2000);
-          }}
-          style={{ 
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-            background: lockStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.1)',
-            color: lockStatus === 'sending' ? '#10b981' : '#ef4444',
-            border: `1px solid ${lockStatus === 'sending' ? '#10b981' : 'rgba(239, 68, 68, 0.2)'}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
-          }}
-        >
-          <VideoOff size={20} />
-          <span style={{ fontSize: '10px', fontWeight: '900' }}>{lockStatus === 'sending' ? 'SENT!' : 'LOCK ALL'}</span>
-        </button>
-
-        <button 
-          onClick={() => {
-            setRecStatus('sending');
-            onToggleRecordingPermission();
-            setTimeout(() => setRecStatus('idle'), 2000);
-          }}
-          style={{ 
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-            background: recStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : (isRecordingAllowed ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255, 255, 255, 0.05)'),
-            color: recStatus === 'sending' ? '#10b981' : (isRecordingAllowed ? '#22c55e' : '#94a3b8'),
-            border: `1px solid ${recStatus === 'sending' ? '#10b981' : (isRecordingAllowed ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255,255,255,0.1)')}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
-          }}
-        >
-          {recStatus === 'sending' ? <ShieldCheck size={20} /> : (isRecordingAllowed ? <ShieldCheck size={20} /> : <ShieldAlert size={20} />)}
-          <span style={{ fontSize: '10px', fontWeight: '900' }}>{recStatus === 'sending' ? 'UPDATED!' : (isRecordingAllowed ? 'STU-REC: ON' : 'STU-REC: OFF')}</span>
-        </button>
-
-        <button 
-          onClick={() => {
-            setChatStatus('sending');
-            onToggleRoomChat();
-            setTimeout(() => setChatStatus('idle'), 2000);
-          }}
-          style={{ 
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-            background: chatStatus === 'sending' ? 'rgba(16, 185, 129, 0.2)' : (isChatEnabled ? 'rgba(99, 102, 241, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
-            color: chatStatus === 'sending' ? '#10b981' : (isChatEnabled ? '#6366f1' : '#ef4444'),
-            border: `1px solid ${chatStatus === 'sending' ? '#10b981' : (isChatEnabled ? 'rgba(99, 102, 241, 0.2)' : 'rgba(239, 68, 68, 0.2)')}`,
-            borderRadius: '15px', cursor: 'pointer', transition: 'all 0.3s ease'
-          }}
-        >
-          <MessageSquare size={20} />
-          <span style={{ fontSize: '10px', fontWeight: '900' }}>{chatStatus === 'sending' ? 'UPDATED!' : (isChatEnabled ? 'CHAT: ON' : 'CHAT: OFF')}</span>
-        </button>
-      </div>
-      
+      {/* SEARCH BAR — NOW PROMINENT AT TOP */}
       <div style={{ position: 'relative', marginBottom: '20px' }}>
         <Search style={{ position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)', color: '#6366f1' }} size={16} />
         <input 
@@ -174,6 +103,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
           style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', padding: '12px 12px 12px 40px', color: '#fff', outline: 'none', fontSize: '13px' }} 
         />
       </div>
+
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', paddingRight: '10px' }} className="custom-scrollbar">
         {allTimeParticipants
@@ -296,7 +226,56 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                       {isCamMuted ? <VideoOff size={16} /> : <Video size={16} />}
                     </button>
 
-                    <div style={{ flex: 1 }} />
+                    {/* SCREEN SHARE PERMISSION */}
+                    <button 
+                      onClick={() => onToggleScreenSharePermission(pData.identity)}
+                      style={{ 
+                        width: '38px', height: '38px', borderRadius: '12px', 
+                        background: screenShareAllowed.has(pData.identity) ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255,255,255,0.03)', 
+                        color: screenShareAllowed.has(pData.identity) ? '#22c55e' : 'rgba(255,255,255,0.4)', 
+                        border: screenShareAllowed.has(pData.identity) ? '1px solid rgba(34, 197, 94, 0.2)' : '1px solid rgba(255,255,255,0.05)', 
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.3s ease'
+                      }}
+                      title={screenShareAllowed.has(pData.identity) ? "Revoke Screen Share" : "Allow Screen Share"}
+                    >
+                      <MonitorUp size={16} />
+                    </button>
+
+                    
+                    {/* MISSION 15: ORCHESTRATION BUTTONS (MULTI-SELECT) */}
+
+                      <button 
+                        onClick={() => {
+                          const currentList = featuredStudent ? featuredStudent.split(',').filter(Boolean) : [];
+                          const isCurrentlyDash = currentList.includes(pData.identity) && featuredDestination === 'dashboard';
+                          
+                          let newList;
+                          if (isCurrentlyDash) {
+                            newList = currentList.filter(id => id !== pData.identity);
+                          } else if (featuredDestination === 'dashboard') {
+                            newList = [...currentList, pData.identity];
+                          } else {
+                            newList = [pData.identity]; // Switch destination and reset
+                          }
+
+                          socket?.emit('teacher:feature_student', { 
+                            roomName: room.name, 
+                            studentIdentity: newList.length > 0 ? newList.join(',') : '', 
+                            destination: newList.length > 0 ? 'dashboard' : 'none' 
+                          });
+                        }}
+                        style={{ 
+                          width: '38px', height: '38px', borderRadius: '12px', 
+                          background: (featuredStudent?.split(',').includes(pData.identity) && featuredDestination === 'dashboard') ? 'rgba(99, 102, 241, 0.4)' : 'rgba(99, 102, 241, 0.1)', 
+                          color: '#6366f1', 
+                          border: '1px solid rgba(99, 102, 241, 0.2)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          transition: 'all 0.3s ease'
+                        }}
+                        title="Pull to TEACHER Dashboard"
+                      >
+                        <Monitor size={16} />
+                      </button>
 
                     {/* ACTIONS */}
                     <button 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { Room, VideoPresets } from 'livekit-client';
 import { io, Socket } from 'socket.io-client';
 
@@ -16,6 +16,8 @@ interface StudentLiveKitContextType {
   dbStatus: { connected: boolean; status: string };
   socket: Socket | null;
   isRecordingAllowed: boolean;
+  isScreenShareAllowed: boolean;
+  isChatEnabled: boolean;
   isAlreadyJoining: (lectureId: string) => boolean;
   markJoining: (lectureId: string, status: boolean) => void;
 }
@@ -28,7 +30,10 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [error, setError] = useState<string | null>(null);
   const [dbStatus, setDbStatus] = useState<{ connected: boolean; status: string }>({ connected: true, status: 'connected' });
   const [socket, setSocket] = useState<Socket | null>(null);
+  const socketRef = useRef<Socket | null>(null); // stable ref for use inside connect()
   const [isRecordingAllowed, setIsRecordingAllowed] = useState(false);
+  const [isScreenShareAllowed, setIsScreenShareAllowed] = useState(false);
+  const [isChatEnabled, setIsChatEnabled] = useState(true);
 
   // MISSION 12: SYNC LOCK - Preventing Duplicate Join Race Conditions
   const joiningLock = React.useRef<Record<string, boolean>>({});
@@ -50,35 +55,45 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
       reconnectionDelay: 2000
     }); 
     setSocket(s);
+    socketRef.current = s;
 
+    // MISSION 12: SCALE MANDATE - SOCKET ISOLATION
     s.on('connect', () => console.log('[MISSION-12] Student Cinema: Socket Connected'));
-
-    // MISSION 13: GLOBAL TEARDOWN - Redirect on session end
-    s.on('session_ended', () => {
-      console.warn('[MISSION-13] Session ended by teacher. Force redirecting...');
-      window.location.href = '/';
-    });
 
     s.on('sync_room_state', (state: any) => {
       console.log('[CONTEXT-SYNC] Received sync_room_state:', state);
       if (state.isRecordingAllowed !== undefined) {
-        const allowed = state.isRecordingAllowed === true || state.isRecordingAllowed === 'true';
-        setIsRecordingAllowed(allowed);
+        setIsRecordingAllowed(state.isRecordingAllowed === true || state.isRecordingAllowed === 'true');
+      }
+      if (state.isScreenShareAllowed !== undefined) {
+        setIsScreenShareAllowed(state.isScreenShareAllowed === true || state.isScreenShareAllowed === 'true');
       }
     });
 
-    s.on('recording_permission_changed', ({ allowed }: { allowed: any }) => {
-      console.log('[CONTEXT-SYNC] Received recording_permission_changed:', allowed);
+    s.on('recording_permission_updated', ({ allowed }: { allowed: any }) => {
+      console.log('[CONTEXT-SYNC] Recording Permission Update:', allowed);
       setIsRecordingAllowed(allowed === true || allowed === 'true');
     });
 
+    s.on('screenshare_permission_updated', ({ allowed }: { allowed: any }) => {
+      console.log('[CONTEXT-SYNC] Screenshare Permission Update:', allowed);
+      setIsScreenShareAllowed(allowed === true || allowed === 'true');
+    });
+
+    s.on('chat_status_updated', ({ enabled }: { enabled: any }) => {
+      console.log('[CONTEXT-SYNC] Chat Status Update:', enabled);
+      setIsChatEnabled(enabled === true || enabled === 'true');
+    });
+
     s.on('room_state_pulse', (state: any) => {
-      console.log('[CONTEXT-PULSE] Heartbeat received:', state);
       if (state.isRecordingAllowed !== undefined) {
-        const allowed = state.isRecordingAllowed === true || state.isRecordingAllowed === 'true';
-        setIsRecordingAllowed(allowed);
+        setIsRecordingAllowed(state.isRecordingAllowed === true || state.isRecordingAllowed === 'true');
+      }
+      if (state.isScreenShareAllowed !== undefined) {
+        setIsScreenShareAllowed(state.isScreenShareAllowed === true || state.isScreenShareAllowed === 'true');
       }
     });
+
 
     return () => {
       s.removeAllListeners();
@@ -149,8 +164,10 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
       
       setRoom(r);
       
-      if (socket && r.localParticipant) {
-        socket.emit('join_room', { 
+      // Use socketRef (stable) so connect() doesn't change when socket state changes
+      const s = socketRef.current;
+      if (s && r.localParticipant) {
+        s.emit('join_room', { 
           roomName: r.name, 
           identity: r.localParticipant.identity,
           role: 'student'
@@ -164,10 +181,13 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } finally {
       setIsConnecting(false);
     }
-  }, [socket]);
+  }, []); // ← Stable: no deps, uses ref internally
+
+  const isDisconnectingRef = useRef(false);
 
   const disconnect = useCallback(async () => {
-    if (room) {
+    if (room && !isDisconnectingRef.current) {
+      isDisconnectingRef.current = true;
       console.warn('[STUDENT-SECURITY] Sovereign Protection: Nuclear Teardown Initiated');
       
       // 1. SYNC HARDWARE STOP (Critical for BF Cache)
@@ -211,6 +231,7 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setRoom(null);
         setIsConnecting(false);
         setError(null);
+        isDisconnectingRef.current = false;
       }
     }
   }, [room]);
@@ -257,7 +278,7 @@ export const LiveKitProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [disconnect, room]);
 
   return (
-    <StudentLiveKitContext.Provider value={{ room, connect, disconnect, isConnecting, error, dbStatus, socket, isRecordingAllowed, isAlreadyJoining, markJoining }}>
+    <StudentLiveKitContext.Provider value={{ room, connect, disconnect, isConnecting, error, dbStatus, socket, isRecordingAllowed, isScreenShareAllowed, isChatEnabled, isAlreadyJoining, markJoining }}>
       {children}
     </StudentLiveKitContext.Provider>
   );

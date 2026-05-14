@@ -36,9 +36,8 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
   // MISSION 11: FULL-MEDIA DISCOVERY ENGINE
   useEffect(() => {
     if (track) {
-      if (track.kind === 'video') setResolvedVideoTrack(track.track || track);
-      if (track.kind === 'audio') setResolvedAudioTrack(track.track || track);
-      return;
+      if (track.kind === Track.Kind.Video) setResolvedVideoTrack(track.track || track);
+      if (track.kind === Track.Kind.Audio) setResolvedAudioTrack(track.track || track);
     }
   }, [track]);
 
@@ -46,64 +45,72 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
     if (!participant) return;
 
     const handleUpdate = () => {
-      // MISSION 12: AGGRESSIVE TRACK DISCOVERY (LOCAL + REMOTE)
-      const vTrack = participant.getTrackPublication(Track.Source.ScreenShare)?.videoTrack ||
-        participant.getTrackPublication(Track.Source.Camera)?.videoTrack ||
-        Array.from(participant.videoTrackPublications.values())[0]?.videoTrack;
+      // MISSION 12: AGGRESSIVE TRACK DISCOVERY (Teacher Focus Logic)
+      const vPub = participant.getTrackPublication(Track.Source.ScreenShare) ||
+                   participant.getTrackPublication(Track.Source.Camera) ||
+                   Array.from(participant.videoTrackPublications.values())[0];
 
-      const aTrack = participant.getTrackPublication(Track.Source.Microphone)?.audioTrack ||
-        Array.from(participant.audioTrackPublications.values())[0]?.audioTrack;
+      const aPub = participant.getTrackPublication(Track.Source.Microphone) ||
+                   Array.from(participant.audioTrackPublications.values())[0];
 
-      if (vTrack && vTrack.sid !== (resolvedVideoTrack?.sid)) {
+      const vTrack = vPub?.videoTrack;
+      const aTrack = aPub?.audioTrack;
+
+      if (vTrack && vTrack.sid !== resolvedVideoTrack?.sid) {
         setResolvedVideoTrack(vTrack);
       }
-      if (aTrack && aTrack.sid !== (resolvedAudioTrack?.sid)) {
+      if (aTrack && aTrack.sid !== resolvedAudioTrack?.sid) {
         setResolvedAudioTrack(aTrack);
       }
     };
 
-    participant.on(ParticipantEvent.TrackPublished, handleUpdate);
-    participant.on(ParticipantEvent.TrackUnpublished, handleUpdate);
-    participant.on(ParticipantEvent.TrackSubscribed, handleUpdate);
-    participant.on(ParticipantEvent.TrackUnsubscribed, handleUpdate);
+    participant.on(Participant.Event.TrackPublished, handleUpdate);
+    participant.on(Participant.Event.TrackUnpublished, handleUpdate);
+    participant.on(Participant.Event.TrackSubscribed, handleUpdate);
+    participant.on(Participant.Event.TrackUnsubscribed, handleUpdate);
 
     // Initial check
     handleUpdate();
 
     return () => {
-      participant.off(ParticipantEvent.TrackSubscribed, handleUpdate);
-      participant.off(ParticipantEvent.TrackUnsubscribed, handleUpdate);
-      participant.off(ParticipantEvent.TrackPublished, handleUpdate);
-      participant.off(ParticipantEvent.TrackUnpublished, handleUpdate);
+      participant.off(Participant.Event.TrackPublished, handleUpdate);
+      participant.off(Participant.Event.TrackUnpublished, handleUpdate);
+      participant.off(Participant.Event.TrackSubscribed, handleUpdate);
+      participant.off(Participant.Event.TrackUnsubscribed, handleUpdate);
     };
-  }, [participant]);
+  }, [participant, resolvedVideoTrack, resolvedAudioTrack]);
 
   // MISSION 12: SOVEREIGN ATTACHMENT (CONSOLIDATED)
   useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !resolvedVideoTrack) return;
+    const videoEl = videoRef.current;
+    if (!videoEl || !resolvedVideoTrack) return;
     
     // Avoid re-attaching if already attached to same track
-    if ((el as any)._attachedTrackSid === resolvedVideoTrack.sid) return;
+    if ((videoEl as any)._attachedTrackSid === resolvedVideoTrack.sid) return;
 
-    resolvedVideoTrack.attach(el);
-    (el as any)._attachedTrackSid = resolvedVideoTrack.sid;
+    console.log(`[VideoTrack] Attaching Video: ${resolvedVideoTrack.sid}`);
+    resolvedVideoTrack.attach(videoEl);
+    (videoEl as any)._attachedTrackSid = resolvedVideoTrack.sid;
     
-    el.play().catch(() => {});
+    videoEl.play().catch(() => {});
 
     return () => {
-      resolvedVideoTrack.detach(el);
-      (el as any)._attachedTrackSid = null;
+      console.log(`[VideoTrack] Detaching Video: ${resolvedVideoTrack.sid}`);
+      resolvedVideoTrack.detach(videoEl);
+      (videoEl as any)._attachedTrackSid = null;
     };
   }, [resolvedVideoTrack]);
 
   // Audio Engine remains on useEffect for background management
   useEffect(() => {
-    const el = audioRef.current;
-    if (resolvedAudioTrack && el) {
-      resolvedAudioTrack.attach(el);
+    const audioEl = audioRef.current;
+    const track = resolvedAudioTrack;
+    if (track && audioEl) {
+      console.log(`[VideoTrack] Attaching Audio: ${track.sid}`);
+      track.attach(audioEl);
       return () => {
-        resolvedAudioTrack.detach(el);
+        console.log(`[VideoTrack] Detaching Audio: ${track.sid}`);
+        track.detach(audioEl);
       };
     }
   }, [resolvedAudioTrack]);
@@ -123,6 +130,7 @@ export const VideoTrack: React.FC<VideoTrackProps> = ({
           autoPlay
           playsInline
           muted={mode === 'pip' || mode === 'preview'}
+          data-main-video={mode === 'main' ? 'true' : undefined}
           style={{
             width: '100%',
             height: '100%',

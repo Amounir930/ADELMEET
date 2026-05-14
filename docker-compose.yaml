@@ -10,7 +10,7 @@ services:
     volumes:
       - ./livekit.yaml:/livekit.yaml
     environment:
-      - LIVEKIT_KEYS=devkey: secret
+      - "LIVEKIT_KEYS=devkey: secret"
 
   redis:
     image: redis:7-alpine

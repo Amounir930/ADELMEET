@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import logger from './logger';
 import { socketService } from '../services/socket.service';
 
-export const connectDB = async () => {
+export const connectDB = async (retryCount = 0) => {
   try {
     const connStr = process.env.MONGODB_URI || '';
     if (!connStr) {
@@ -10,8 +10,11 @@ export const connectDB = async () => {
       process.exit(1);
     }
 
-    // Connect to MongoDB with a timeout to prevent indefinite waiting
-    await mongoose.connect(connStr, { serverSelectionTimeoutMS: 5000 });
+    // Connect to MongoDB with a timeout
+    await mongoose.connect(connStr, { 
+      serverSelectionTimeoutMS: 5000,
+      connectTimeoutMS: 10000
+    });
 
     logger.info('🚀 MongoDB Connected successfully (LIVE MODE)');
 
@@ -34,10 +37,6 @@ export const connectDB = async () => {
             id: lectureId,
             status: fullDoc.status 
           });
-        } else {
-          // Fallback if roomName is missing (shouldn't happen with updateLookup)
-          logger.warn(`[DB-WATCH] RoomName missing for lecture: ${lectureId}, fallback to global sync`);
-          socketService.getIO()?.emit('db_sync', { collection: 'lectures', id: lectureId });
         }
       }
     });
@@ -47,9 +46,12 @@ export const connectDB = async () => {
     });
 
   } catch (error: any) {
-    logger.error('❌ MongoDB Connection Error Detail:');
-    console.error(error);
-    process.exit(1);
+    logger.error(`❌ MongoDB Connection Error (Attempt ${retryCount + 1}): ${error.message}`);
+    
+    // Retry instead of exiting
+    setTimeout(() => {
+      connectDB(retryCount + 1);
+    }, 5000);
   }
 };
 

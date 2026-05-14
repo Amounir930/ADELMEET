@@ -11,6 +11,58 @@ class DisplayAssignmentService {
     logger.info('[DISPLAY-ENGINE] Sovereign Display Assignment Service Active — Redis-backed');
   }
 
+  // MISSION 12: AUTO-DISCOVERY STATE
+  // Maps hardwareId -> { roomName, screenIndex, socketIds: Set<string> }
+  private activeScreens: Map<string, { roomName: string, screenIndex: number, socketIds: Set<string> }> = new Map();
+
+  /** 
+   * Automatic Screen Index Assignment
+   * Finds the lowest available screen index or reclaims existing one for a hardwareId.
+   */
+  async autoRegisterScreen(roomName: string, socketId: string, hardwareId: string): Promise<number> {
+    // 1. Check if this hardware already has an assignment in this room
+    const existing = this.activeScreens.get(hardwareId);
+    if (existing && existing.roomName === roomName) {
+      existing.socketIds.add(socketId);
+      logger.info(`[DISPLAY-ENGINE] Hardware ${hardwareId} reclaimed Screen ${existing.screenIndex}`);
+      return existing.screenIndex;
+    }
+
+    // 2. Find lowest available index
+    const assignments = await stateService.getAllAssignmentsForRoom(roomName);
+    const existingIndices = Object.keys(assignments).map(k => Number(k.replace('screen:', ''))).sort((a,b) => a-b);
+    
+    let targetIndex = 0;
+    while (existingIndices.includes(targetIndex)) {
+      targetIndex++;
+    }
+
+    await this.registerScreen(roomName, targetIndex);
+    this.activeScreens.set(hardwareId, { roomName, screenIndex: targetIndex, socketIds: new Set([socketId]) });
+    
+    logger.info(`[DISPLAY-ENGINE] New Hardware ${hardwareId} assigned Screen ${targetIndex} (${socketId})`);
+    return targetIndex;
+  }
+
+  /**
+   * Cleanup screen on disconnect
+   */
+  async handleDisconnect(socketId: string) {
+    // Find hardwareId by socketId
+    for (const [hwId, data] of this.activeScreens.entries()) {
+      if (data.socketIds.has(socketId)) {
+        data.socketIds.delete(socketId);
+        // Only cleanup if ALL sockets for this hardware are gone
+        if (data.socketIds.size === 0) {
+          logger.info(`[DISPLAY-ENGINE] Hardware ${hwId} offline. Cleaning up Screen ${data.screenIndex}...`);
+          await this.unregisterScreen(data.roomName, data.screenIndex);
+          this.activeScreens.delete(hwId);
+        }
+        break;
+      }
+    }
+  }
+
   // ─── SCREEN REGISTRY ─────────────────────────────────────────────────────
 
   async registerScreen(roomName: string, screenIndex: number) {
@@ -50,6 +102,7 @@ class DisplayAssignmentService {
   // ─── STUDENT REGISTRY ─────────────────────────────────────────────────────
 
   async addStudent(roomName: string, studentIdentity: string) {
+    await stateService.trackStudent(roomName, studentIdentity);
     const assignments = await stateService.getAllAssignmentsForRoom(roomName);
     const screenKeys = Object.keys(assignments);
     
@@ -72,6 +125,7 @@ class DisplayAssignmentService {
   }
 
   async removeStudent(roomName: string, studentIdentity: string) {
+    await stateService.untrackStudent(roomName, studentIdentity);
     const assignments = await stateService.getAllAssignmentsForRoom(roomName);
     
     for (const [key, students] of Object.entries(assignments)) {
@@ -95,7 +149,8 @@ class DisplayAssignmentService {
     
     if (screenKeys.length === 0) return;
 
-    const allStudents = Array.from(new Set(Object.values(assignments).flat())).sort();
+    // MISSION 12 FIX: Use master student list from StateService for rebalancing
+    const allStudents = (await stateService.getAllStudentsInRoom(roomName)).sort();
     const n = screenKeys.length;
 
     for (let i = 0; i < n; i++) {
@@ -131,8 +186,16 @@ class DisplayAssignmentService {
       });
     }
 
+    // MISSION 12: Real-time Teacher Notification
+    // Inform everyone in the room (especially the teacher) about the orchestration state
+    this.io.to(roomName).emit('display:orchestration_update', {
+      onlineScreensCount: totalScreens,
+      activeIndices
+    });
+
     logger.info(`[DISPLAY-ENGINE] Assignment broadcast → ${roomName} (${totalStudents} students, ${totalScreens} screens)`);
   }
+
 
   async getAssignments(roomName: string) {
     return await stateService.getAllAssignmentsForRoom(roomName);

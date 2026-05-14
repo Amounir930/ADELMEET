@@ -38,14 +38,21 @@ app.use(helmet({
   contentSecurityPolicy: false
 }));
 
+import webhookRoutes from './routes/webhook.routes';
+app.use('/api/webhooks', webhookRoutes);
+
 app.use(express.json({ limit: '40mb' }));
 app.use(dbCheckMiddleware);
+
+import wallRoutes from './routes/wall.routes';
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/lectures', lectureRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/displays', displayRoutes);
+app.use('/api/wall', wallRoutes); // PUBLIC — no auth (wall display screens)
+
 
 // Health check
 app.get('/health', (req, res) => {
@@ -70,7 +77,9 @@ app.use(errorHandler);
 // Connect to Database and start server
 const startServer = async () => {
   try {
-    await connectDB();
+    // Start DB connection in background (it will retry on its own)
+    connectDB(); 
+    
     await connectRedis(); // MISSION 07: Distributed State
     
     // Initialize Socket.io AFTER infra is ready

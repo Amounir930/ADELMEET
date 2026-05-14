@@ -25,12 +25,12 @@ interface StudentChatProps {
   isOpen: boolean;
   onClose: () => void;
   onNewPrivate: () => void;
+  isChatEnabled: boolean;
 }
 
-export const StudentChat: React.FC<StudentChatProps> = ({ socket, room, isOpen, onClose, onNewPrivate }) => {
+export const StudentChat: React.FC<StudentChatProps> = ({ socket, room, isOpen, onClose, onNewPrivate, isChatEnabled }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
-  const [isChatEnabled, setIsChatEnabled] = useState(true);
   const [chatType, setChatType] = useState<'public' | 'private'>('public');
   const [isSending, setIsSending] = useState(false);
   const [unreadTeacherMessages, setUnreadTeacherMessages] = useState(0);
@@ -71,10 +71,6 @@ export const StudentChat: React.FC<StudentChatProps> = ({ socket, room, isOpen, 
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, file } : m));
     });
 
-    socket.on('chat:permission_changed', ({ enabled }: { enabled: boolean }) => {
-      setIsChatEnabled(enabled);
-    });
-
     socket.on('chat:history', ({ history }: { history: Message[] }) => {
       const filtered = history.filter(msg => {
         if (!msg.isPrivate) return true;
@@ -96,7 +92,6 @@ export const StudentChat: React.FC<StudentChatProps> = ({ socket, room, isOpen, 
       socket.off('chat:file_data');
       socket.off('chat:history');
       socket.off('chat:error');
-      socket.off('chat:permission_changed');
     };
   }, [socket, room.localParticipant.identity, room.name, isOpen, onNewPrivate, chatType]);
 

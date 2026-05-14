@@ -9,8 +9,11 @@ import { Dashboard } from './components/Dashboard';
 import { VideoRoom } from './components/VideoRoom';
 import { GridPage } from './components/GridPage';
 import { ScreenLauncher } from './components/ScreenLauncher';
+import { WallGroupLanding } from './components/WallGroupLanding';
+import { WallRoomView } from './components/WallRoomView';
 import { Loader2 } from 'lucide-react';
 import TitleBar from './components/TitleBar';
+import { SocketProvider } from './contexts/SocketContext';
 
 
 const AppRoutes: React.FC = () => {
@@ -28,6 +31,13 @@ const AppRoutes: React.FC = () => {
         <div style={{ fontWeight: '800', letterSpacing: '1px' }}>INITIALIZING ACADEMIC SYSTEM...</div>
       </div>
     );
+  }
+
+  // MISSION 12: Redirect kiosk displays to wall landing automatically if ?group is present
+  const urlParams = new URLSearchParams(window.location.search);
+  const groupParam = urlParams.get('group');
+  if (groupParam && window.location.pathname === '/') {
+    return <Navigate to={`/display?group=${groupParam}`} replace />;
   }
 
   return (
@@ -50,7 +60,14 @@ const AppRoutes: React.FC = () => {
                 <div style={{ width: '100%', height: '100%' }}>
                   {localError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{localError}</div>}
                   {lkError && <div className="error-banner" style={{ background: '#ef4444', color: 'white', padding: '10px', textAlign: 'center' }}>{lkError}</div>}
-                  <Dashboard onJoin={(roomName: string, screens: number) => navigate(`/room/${roomName}?screens=${screens || 0}`)} />
+                  <Dashboard onJoin={(roomName: string, config: any) => {
+                    const p = new URLSearchParams();
+                    p.set('hall', config.hallNumber);
+                    p.set('chat', config.chat.toString());
+                    p.set('record', config.record.toString());
+                    p.set('share', config.share.toString());
+                    navigate(`/room/${roomName}?${p.toString()}`);
+                  }} />
                 </div>
               ) : (
                 <Navigate to="/login" />
@@ -80,17 +97,35 @@ const AppRoutes: React.FC = () => {
   );
 };
 
-import { SocketProvider } from './contexts/SocketContext';
-
 const App: React.FC = () => (
   <BrowserRouter>
-    <AuthProvider>
-      <SocketProvider>
-        <LiveKitProvider>
-          <AppRoutes />
-        </LiveKitProvider>
-      </SocketProvider>
-    </AuthProvider>
+    <Routes>
+      {/* ── PUBLIC WALL ROUTES — No auth required, kiosk mode ──────────── */}
+      {/* IT sets these as permanent URLs, screens never need to log in      */}
+      {/* Example: wall.60sec.shop/display?group=hall-101                    */}
+      <Route path="/display" element={
+        <SocketProvider>
+          <WallGroupLanding />
+        </SocketProvider>
+      } />
+      {/* Example: wall.60sec.shop/wall-view/room-abc123?group=hall-101      */}
+      <Route path="/wall-view/:roomName" element={
+        <SocketProvider>
+          <WallRoomView />
+        </SocketProvider>
+      } />
+
+      {/* ── AUTHENTICATED APP ────────────────────────────────────────────── */}
+      <Route path="/*" element={
+        <AuthProvider>
+          <SocketProvider>
+            <LiveKitProvider>
+              <AppRoutes />
+            </LiveKitProvider>
+          </SocketProvider>
+        </AuthProvider>
+      } />
+    </Routes>
   </BrowserRouter>
 );
 

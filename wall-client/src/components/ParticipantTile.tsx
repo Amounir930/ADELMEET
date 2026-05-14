@@ -3,9 +3,10 @@ import { Participant, Track } from 'livekit-client';
 
 interface ParticipantTileProps {
   participant: Participant;
+  isFeatured?: boolean;
 }
 
-export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant }) => {
+export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant, isFeatured = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -17,6 +18,15 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant })
         track.attach(videoRef.current);
       } else if (track.kind === Track.Kind.Audio && audioRef.current) {
         track.attach(audioRef.current);
+      }
+    };
+
+    const detachTrack = (track: any) => {
+      if (!track) return;
+      if (track.kind === Track.Kind.Video && videoRef.current) {
+        track.detach(videoRef.current);
+      } else if (track.kind === Track.Kind.Audio && audioRef.current) {
+        track.detach(audioRef.current);
       }
     };
 
@@ -39,7 +49,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant })
       participant.off('trackSubscribed', handleSubscribed);
       participant.off('trackPublished', handlePublished);
       participant.getTrackPublications().forEach(pub => {
-        if (pub.track) pub.track.detach();
+        if (pub.track) detachTrack(pub.track);
       });
     };
   }, [participant]);
@@ -48,11 +58,13 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({ participant })
     <div className="glass" style={{ 
       position: 'relative', 
       overflow: 'hidden', 
-      aspectRatio: '16/9',
-      maxHeight: '70vh',
+      aspectRatio: isFeatured ? 'auto' : '16/9',
+      maxHeight: isFeatured ? 'none' : '70vh',
+      width: '100%',
+      height: '100%',
       background: '#000',
-      border: '2px solid var(--accent-color)',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+      border: isFeatured ? 'none' : '2px solid var(--accent-color)',
+      boxShadow: isFeatured ? 'none' : '0 10px 30px rgba(0,0,0,0.5)'
     }}>
       <video 
         ref={videoRef} 
